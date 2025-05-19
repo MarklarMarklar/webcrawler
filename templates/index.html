@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Scraper Configuration</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Web Scraper Configuration</h1>
+        
+        <!-- Mock mode notification banner -->
+        <div id="mock-mode-banner" class="mock-mode-banner" style="display: none;">
+            <div class="mock-banner-content">
+                <strong>⚠️ Running in Mock Mode:</strong> 
+                <span>AI features are simulated. The application cannot connect to the LLM running in Windows from WSL.</span>
+                <button id="dismiss-mock-banner" class="dismiss-button">×</button>
+            </div>
+        </div>
+        
+        <div class="card" id="api-config-section">
+            <h2>AI Assistant Configuration</h2>
+            <div class="form-group">
+                <label for="api-url">LM Studio API URL:</label>
+                <div class="input-with-button">
+                    <input type="text" id="api-url" name="api_url" value="http://localhost:1234/v1" placeholder="e.g., http://localhost:1234/v1">
+                    <button type="button" id="update-api">Update Connection</button>
+                </div>
+                <div class="connection-actions">
+                    <button type="button" id="auto-discover" class="secondary-button">Auto-discover Connection</button>
+                    <button type="button" id="rediscover" class="secondary-button">Re-test Connection</button>
+                </div>
+                <div class="quick-connect-options">
+                    <span>Quick connect:</span>
+                    <button type="button" class="quick-connect" data-url="http://127.0.0.1:1234/v1">127.0.0.1</button>
+                    <button type="button" class="quick-connect" data-url="http://localhost:1234/v1">localhost</button>
+                    <button type="button" class="quick-connect" data-url="http://172.31.64.1:1234/v1">WSL Bridge</button>
+                    <button type="button" class="quick-connect" data-url="http://host.docker.internal:1234/v1">Docker Host</button>
+                </div>
+                <div class="mock-mode-option">
+                    <label for="use-mock-mode">
+                        <input type="checkbox" id="use-mock-mode" name="use_mock_mode">
+                        Use Mock Mode (work offline without LLM connection)
+                    </label>
+                </div>
+                <div id="wsl-tip">
+                    <strong>WSL Connection Tip:</strong> If connecting from WSL to Windows, try the WSL Bridge or Docker Host options.
+                </div>
+                <div id="api-status"></div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Step 1: Configure Target Website</h2>
+            <form id="scraper-form">
+                <div class="form-group">
+                    <label for="start-url">Start URL:</label>
+                    <input type="url" id="start-url" name="start_url" required 
+                           placeholder="https://example.com">
+                </div>
+
+                <div id="llm-query-section" class="form-group">
+                    <label for="llm-query">Describe what you want to extract (AI-powered):</label>
+                    <div class="input-with-button">
+                        <input type="text" id="llm-query" name="llm_query"
+                               placeholder="e.g., Get the price and availability of this book">
+                        <button type="button" id="generate-selectors">Generate Selectors</button>
+                    </div>
+                    <div id="llm-status"></div>
+                </div>
+
+                <div class="form-group">
+                    <label for="pagination-selector">Pagination Selector (optional):</label>
+                    <input type="text" id="pagination-selector" name="pagination_selector" 
+                           placeholder=".next a::attr(href)">
+                </div>
+
+                <h3>Field Selectors</h3>
+                <div id="selectors-container">
+                    <div class="selector-item">
+                        <input type="text" placeholder="Field name" class="field-name" required>
+                        <input type="text" placeholder="CSS selector" class="field-selector" required>
+                        <button type="button" class="test-selector">Test</button>
+                        <button type="button" class="remove-selector">Remove</button>
+                        <div class="test-result"></div>
+                    </div>
+                </div>
+                <button type="button" id="add-selector">Add Field</button>
+
+                <div class="form-group">
+                    <label for="export-format">Export Format:</label>
+                    <select id="export-format" name="export_format">
+                        <option value="json">JSON</option>
+                        <option value="csv">CSV</option>
+                    </select>
+                </div>
+
+                <button type="submit">Start Scraping</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Results</h2>
+            <div id="results">
+                <!-- Results will be displayed here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Check API status on page load
+        document.addEventListener('DOMContentLoaded', async function() {
+            // Check current API status
+            try {
+                const response = await fetch('/api-status');
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Update the mock mode checkbox
+                    document.getElementById('use-mock-mode').checked = data.mock_mode;
+                    
+                    // Show mock mode banner if in mock mode
+                    if (data.mock_mode) {
+                        document.getElementById('mock-mode-banner').style.display = 'block';
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking API status:', error);
+            }
+            
+            // Rest of the initialization code
+            testLLMConnection();
+        });
+        
+        // Dismiss mock mode banner
+        document.getElementById('dismiss-mock-banner').addEventListener('click', function() {
+            document.getElementById('mock-mode-banner').style.display = 'none';
+        });
+
+        // Test LLM connection
+        async function testLLMConnection() {
+            try {
+                const response = await fetch('/test-llm');
+                const data = await response.json();
+                
+                const llmStatus = document.getElementById('llm-status');
+                const apiStatus = document.getElementById('api-status');
+                const mockBanner = document.getElementById('mock-mode-banner');
+                
+                if (data.success) {
+                    if (data.warning) {
+                        // Show the mock mode warning banner
+                        mockBanner.style.display = 'block';
+                        
+                        llmStatus.innerHTML = '<span class="status-warning">⚠ ' + data.warning + '</span>';
+                        apiStatus.innerHTML = '<span class="status-warning">⚠ Running in mock mode</span>';
+                    } else {
+                        // Hide the mock mode banner
+                        mockBanner.style.display = 'none';
+                        
+                        llmStatus.innerHTML = '<span class="status-ok">✓ AI Assistant connected</span>';
+                        apiStatus.innerHTML = '<span class="status-ok">✓ Connected successfully to ' + data.api_url + '</span>';
+                    }
+                } else {
+                    // Hide the mock mode banner for connection errors
+                    mockBanner.style.display = 'none';
+                    
+                    llmStatus.innerHTML = '<span class="status-error">✗ AI Assistant not available: ' + data.error + '</span>';
+                    apiStatus.innerHTML = '<span class="status-error">✗ Connection failed: ' + data.error + '</span>';
+                    
+                    if (data.tip) {
+                        apiStatus.innerHTML += '<br><span class="status-tip">' + data.tip + '</span>';
+                    }
+                    
+                    // Show a message about trying mock mode
+                    apiStatus.innerHTML += '<br><span class="status-tip">Try auto-discovery or enable Mock Mode to work offline</span>';
+                    
+                    document.getElementById('generate-selectors').disabled = true;
+                }
+            } catch (error) {
+                document.getElementById('llm-status').innerHTML = 
+                    '<span class="status-error">✗ Could not connect to AI Assistant</span>';
+                document.getElementById('api-status').innerHTML = 
+                    '<span class="status-error">✗ Could not connect to API</span>';
+                document.getElementById('generate-selectors').disabled = true;
+            }
+        }
+
+        // Auto-discover button
+        document.getElementById('auto-discover').addEventListener('click', async function() {
+            const apiStatus = document.getElementById('api-status');
+            const discoverButton = document.getElementById('auto-discover');
+            
+            // Show loading state
+            discoverButton.disabled = true;
+            discoverButton.textContent = 'Discovering...';
+            apiStatus.innerHTML = '<span class="loading">Auto-discovering LM Studio connection</span>';
+            
+            try {
+                const response = await fetch('/configure-api', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ auto_discover: true })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    apiStatus.innerHTML = '<span class="status-ok">✓ Found connection at ' + data.api_url + '</span>';
+                    // Update the URL input field
+                    document.getElementById('api-url').value = data.api_url;
+                    document.getElementById('generate-selectors').disabled = false;
+                    document.getElementById('llm-status').innerHTML = '<span class="status-ok">✓ AI Assistant connected</span>';
+                    
+                    // Update mock mode banner
+                    document.getElementById('mock-mode-banner').style.display = data.mock_mode ? 'block' : 'none';
+                } else {
+                    apiStatus.innerHTML = '<span class="status-error">✗ Auto-discovery failed: ' + data.error + '</span>';
+                    if (data.tip) {
+                        apiStatus.innerHTML += '<br><span class="status-tip">' + data.tip + '</span>';
+                    }
+                }
+            } catch (error) {
+                apiStatus.innerHTML = '<span class="status-error">✗ Error: ' + error.message + '</span>';
+            } finally {
+                // Reset button state
+                discoverButton.disabled = false;
+                discoverButton.textContent = 'Auto-discover Connection';
+            }
+        });
+        
+        // Re-test connection button
+        document.getElementById('rediscover').addEventListener('click', async function() {
+            const apiStatus = document.getElementById('api-status');
+            const retestButton = document.getElementById('rediscover');
+            
+            // Show loading state
+            retestButton.disabled = true;
+            retestButton.textContent = 'Testing...';
+            apiStatus.innerHTML = '<span class="loading">Re-testing LM Studio connection</span>';
+            
+            try {
+                const response = await fetch('/test-llm?rediscover=true');
+                const data = await response.json();
+                
+                if (data.success) {
+                    apiStatus.innerHTML = '<span class="status-ok">✓ Connection working at ' + data.api_url + '</span>';
+                    document.getElementById('generate-selectors').disabled = false;
+                    document.getElementById('llm-status').innerHTML = '<span class="status-ok">✓ AI Assistant connected</span>';
+                } else {
+                    apiStatus.innerHTML = '<span class="status-error">✗ Connection failed: ' + data.error + '</span>';
+                    if (data.tip) {
+                        apiStatus.innerHTML += '<br><span class="status-tip">' + data.tip + '</span>';
+                    }
+                }
+            } catch (error) {
+                apiStatus.innerHTML = '<span class="status-error">✗ Error: ' + error.message + '</span>';
+            } finally {
+                // Reset button state
+                retestButton.disabled = false;
+                retestButton.textContent = 'Re-test Connection';
+            }
+        });
+
+        // Quick connect buttons
+        document.querySelectorAll('.quick-connect').forEach(button => {
+            button.addEventListener('click', function() {
+                const url = this.getAttribute('data-url');
+                document.getElementById('api-url').value = url;
+                // Trigger connection update
+                document.getElementById('update-api').click();
+            });
+        });
+        
+        // Configure API connection
+        document.getElementById('update-api').addEventListener('click', async function() {
+            const apiUrl = document.getElementById('api-url').value;
+            const apiStatus = document.getElementById('api-status');
+            const updateButton = document.getElementById('update-api');
+            const useMock = document.getElementById('use-mock-mode').checked;
+            
+            if (!apiUrl && !useMock) {
+                apiStatus.innerHTML = '<span class="status-error">Please enter API URL or enable mock mode</span>';
+                return;
+            }
+            
+            // Show loading state
+            updateButton.disabled = true;
+            updateButton.textContent = 'Connecting...';
+            apiStatus.innerHTML = '<span class="loading">Testing connection to API</span>';
+            
+            try {
+                const response = await fetch('/configure-api', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ api_url: apiUrl, use_mock: useMock })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    if (data.mock_mode) {
+                        apiStatus.innerHTML = '<span class="status-warning">⚠ Running in mock mode - AI features will be simulated</span>';
+                    } else {
+                        apiStatus.innerHTML = '<span class="status-ok">✓ Connected successfully to ' + data.api_url + '</span>';
+                    }
+                    document.getElementById('generate-selectors').disabled = false;
+                    document.getElementById('llm-status').innerHTML = data.mock_mode ? 
+                        '<span class="status-warning">⚠ Using mock AI (simulated responses)</span>' : 
+                        '<span class="status-ok">✓ AI Assistant connected</span>';
+                } else {
+                    apiStatus.innerHTML = '<span class="status-error">✗ Connection failed: ' + data.error + '</span>';
+                    if (data.tip) {
+                        apiStatus.innerHTML += '<br><span class="status-tip">' + data.tip + '</span>';
+                    }
+                }
+            } catch (error) {
+                apiStatus.innerHTML = '<span class="status-error">✗ Error: ' + error.message + '</span>';
+            } finally {
+                // Reset button state
+                updateButton.disabled = false;
+                updateButton.textContent = 'Update Connection';
+            }
+        });
+
+        // Generate selectors using the LLM
+        document.getElementById('generate-selectors').addEventListener('click', async function() {
+            const url = document.getElementById('start-url').value;
+            const query = document.getElementById('llm-query').value;
+            const llmStatus = document.getElementById('llm-status');
+            const generateButton = document.getElementById('generate-selectors');
+            
+            if (!url || !query) {
+                llmStatus.innerHTML = '<span class="status-error">Please enter both URL and query</span>';
+                return;
+            }
+            
+            // Show loading state
+            generateButton.disabled = true;
+            generateButton.textContent = 'Generating...';
+            llmStatus.innerHTML = '<span class="loading">Asking AI to generate selectors</span>';
+            
+            try {
+                const response = await fetch('/generate-selectors', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url, query })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    llmStatus.innerHTML = '<span class="status-ok">✓ Selectors generated successfully</span>';
+                    
+                    // If there's a warning (mock mode), display it
+                    if (data.warning) {
+                        llmStatus.innerHTML += '<br><span class="status-warning">⚠ ' + data.warning + '</span>';
+                    }
+                    
+                    // Clear existing selectors
+                    document.getElementById('selectors-container').innerHTML = '';
+                    
+                    // Add new selectors from the LLM
+                    for (const [fieldName, selector] of Object.entries(data.selectors)) {
+                        addSelector(fieldName, selector);
+                    }
+                } else {
+                    llmStatus.innerHTML = '<span class="status-error">✗ Error generating selectors: ' + data.error + '</span>';
+                }
+            } catch (error) {
+                llmStatus.innerHTML = '<span class="status-error">✗ Error: ' + error.message + '</span>';
+            } finally {
+                // Reset button state
+                generateButton.disabled = false;
+                generateButton.textContent = 'Generate Selectors';
+            }
+        });
+
+        // Add new selector field
+        document.getElementById('add-selector').addEventListener('click', function() {
+            addSelector('', '');
+        });
+        
+        function addSelector(fieldName = '', cssSelector = '') {
+            const container = document.getElementById('selectors-container');
+            const newSelector = document.createElement('div');
+            newSelector.className = 'selector-item';
+            newSelector.innerHTML = `
+                <input type="text" placeholder="Field name" class="field-name" required value="${fieldName}">
+                <input type="text" placeholder="CSS selector" class="field-selector" required value="${cssSelector}">
+                <button type="button" class="test-selector">Test</button>
+                <button type="button" class="remove-selector">Remove</button>
+                <div class="test-result"></div>
+            `;
+            container.appendChild(newSelector);
+        }
+
+        // Remove selector field
+        document.getElementById('selectors-container').addEventListener('click', function(e) {
+            if (e.target.classList.contains('remove-selector')) {
+                e.target.closest('.selector-item').remove();
+            }
+        });
+
+        // Test selector
+        document.getElementById('selectors-container').addEventListener('click', async function(e) {
+            if (e.target.classList.contains('test-selector')) {
+                const selectorItem = e.target.closest('.selector-item');
+                const url = document.getElementById('start-url').value;
+                const selector = selectorItem.querySelector('.field-selector').value;
+                const resultDiv = selectorItem.querySelector('.test-result');
+                const testButton = selectorItem.querySelector('.test-selector');
+
+                if (!url || !selector) {
+                    resultDiv.textContent = 'Please enter both URL and selector';
+                    resultDiv.className = 'test-result error';
+                    return;
+                }
+
+                // Disable the test button and show loading state
+                testButton.disabled = true;
+                testButton.textContent = 'Testing...';
+                resultDiv.textContent = 'Testing selector...';
+                resultDiv.className = 'test-result';
+
+                try {
+                    const response = await fetch('/test-selector', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ url, selector })
+                    });
+
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        resultDiv.textContent = `Test successful! Found: ${data.result}`;
+                        resultDiv.className = 'test-result success';
+                    } else {
+                        resultDiv.textContent = `Test failed: ${data.result || data.error}`;
+                        resultDiv.className = 'test-result error';
+                    }
+                } catch (error) {
+                    resultDiv.textContent = `Error: ${error.message}`;
+                    resultDiv.className = 'test-result error';
+                } finally {
+                    // Re-enable the test button
+                    testButton.disabled = false;
+                    testButton.textContent = 'Test';
+                }
+            }
+        });
+
+        // Handle form submission
+        document.getElementById('scraper-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const url = document.getElementById('start-url').value;
+            const selectors = {};
+            let hasErrors = false;
+            
+            // Clear previous error states
+            document.querySelectorAll('.field-name, .field-selector').forEach(input => {
+                input.classList.remove('error');
+            });
+            
+            // Gather and validate all selectors
+            document.querySelectorAll('.selector-item').forEach(item => {
+                const fieldName = item.querySelector('.field-name').value;
+                const selector = item.querySelector('.field-selector').value;
+                
+                if (!fieldName || !selector) {
+                    item.querySelector('.field-name').classList.add('error');
+                    item.querySelector('.field-selector').classList.add('error');
+                    hasErrors = true;
+                    return;
+                }
+                
+                selectors[fieldName] = selector;
+            });
+            
+            if (hasErrors) {
+                document.getElementById('results').innerHTML = 'Please fill in all required fields';
+                return;
+            }
+
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<div class="loading">Scraping in progress...</div>';
+
+            try {
+                const response = await fetch('/scrape', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        start_url: url,
+                        selectors: selectors
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultsDiv.innerHTML = `<pre>${JSON.stringify(data.data, null, 2)}</pre>`;
+                } else {
+                    resultsDiv.innerHTML = `<div class="error">Error: ${data.error}</div>`;
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        });
+    </script>
+</body>
+</html> 

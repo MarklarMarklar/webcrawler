@@ -1,0 +1,321 @@
+:root {
+    --primary-color: #2563eb;
+    --secondary-color: #1e40af;
+    --background-color: #f3f4f6;
+    --text-color: #1f2937;
+    --error-color: #dc2626;
+    --success-color: #059669;
+    --warning-color: #f59e0b;
+    --tip-color: #6366f1;
+}
+
+body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    line-height: 1.5;
+    background-color: var(--background-color);
+    color: var(--text-color);
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+.card {
+    background: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    margin-bottom: 1.5rem;
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+input[type="text"], input[type="url"], select {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 1rem;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+input[type="text"]:focus, input[type="url"]:focus, select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+input.error {
+    border-color: var(--error-color);
+    background-color: #fef2f2;
+}
+
+button {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: background-color 0.2s, opacity 0.2s;
+}
+
+button:hover {
+    background-color: var(--secondary-color);
+}
+
+button:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.selector-list {
+    list-style: none;
+    padding: 0;
+}
+
+.selector-item {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto auto;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    align-items: start;
+}
+
+.test-result {
+    grid-column: 1 / -1;
+    margin-top: 0.5rem;
+    padding: 0.75rem;
+    border-radius: 4px;
+    font-size: 0.875rem;
+}
+
+.test-result.success {
+    background-color: #dcfce7;
+    color: var(--success-color);
+    border: 1px solid #86efac;
+}
+
+.test-result.error {
+    background-color: #fee2e2;
+    color: var(--error-color);
+    border: 1px solid #fca5a5;
+}
+
+.loading {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-color);
+    font-style: italic;
+}
+
+.loading::after {
+    content: "...";
+    animation: loading 1.5s infinite;
+}
+
+@keyframes loading {
+    0% { content: "."; }
+    33% { content: ".."; }
+    66% { content: "..."; }
+}
+
+pre {
+    background: #f8fafc;
+    padding: 1rem;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-size: 0.875rem;
+    line-height: 1.7;
+    margin: 0;
+}
+
+.error {
+    color: var(--error-color);
+    background-color: #fee2e2;
+    padding: 0.75rem;
+    border-radius: 4px;
+    border: 1px solid #fca5a5;
+    margin-top: 0.5rem;
+}
+
+/* New styles for AI assistant */
+.input-with-button {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.input-with-button input {
+    flex: 1;
+}
+
+#llm-status, #api-status {
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+}
+
+.status-error {
+    color: var(--error-color);
+}
+
+.status-ok {
+    color: var(--success-color);
+}
+
+.status-tip {
+    color: var(--tip-color);
+    font-style: italic;
+    display: block;
+    margin-top: 0.25rem;
+}
+
+#llm-query-section {
+    border-left: 3px solid var(--primary-color);
+    padding-left: 1rem;
+    margin-bottom: 1.5rem;
+    background-color: rgba(37, 99, 235, 0.05);
+    padding: 1rem;
+    border-radius: 0 4px 4px 0;
+}
+
+#api-config-section {
+    border-left: 3px solid var(--warning-color);
+    border-radius: 0 8px 8px 0;
+}
+
+/* Quick connect options */
+.quick-connect-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.75rem 0;
+    align-items: center;
+}
+
+.quick-connect-options span {
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.quick-connect {
+    background-color: #e5e7eb;
+    color: var(--text-color);
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+}
+
+.quick-connect:hover {
+    background-color: #d1d5db;
+}
+
+#wsl-tip {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    background-color: #fffbeb;
+    border-left: 3px solid var(--warning-color);
+    border-radius: 0 4px 4px 0;
+    font-size: 0.875rem;
+}
+
+@media (max-width: 768px) {
+    .selector-item {
+        grid-template-columns: 1fr;
+        gap: 0.5rem;
+    }
+    
+    .input-with-button {
+        flex-direction: column;
+    }
+}
+
+/* Add styling for mock mode elements */
+.mock-mode-option {
+    margin: 10px 0;
+    padding: 8px;
+    background-color: #f7f7f7;
+    border-radius: 4px;
+    border-left: 3px solid #ffa500;
+}
+
+.status-warning {
+    color: #ff9800;
+    font-weight: bold;
+}
+
+/* Add styling for connection actions */
+.connection-actions {
+    display: flex;
+    gap: 10px;
+    margin: 10px 0;
+}
+
+.secondary-button {
+    background-color: #e5e7eb;
+    color: var(--text-color);
+    font-size: 0.875rem;
+    border: 1px solid #d1d5db;
+}
+
+.secondary-button:hover {
+    background-color: #d1d5db;
+}
+
+/* Add styling for mock mode banner */
+.mock-mode-banner {
+    background-color: #fff3cd;
+    border: 1px solid #ffeeba;
+    border-left: 4px solid #ffc107;
+    color: #856404;
+    padding: 12px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+    animation: fadeIn 0.3s ease;
+}
+
+.mock-banner-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.mock-banner-content strong {
+    white-space: nowrap;
+}
+
+.mock-banner-content span {
+    flex: 1;
+}
+
+.dismiss-button {
+    background-color: transparent;
+    color: #856404;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0 5px;
+    line-height: 1;
+}
+
+.dismiss-button:hover {
+    background-color: transparent;
+    color: #533f03;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+} 
