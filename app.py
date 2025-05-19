@@ -1,5 +1,16 @@
-from flask import Flask, render_template, request, jsonify
+import sys
 import os
+import time
+
+# Insert the current directory at the beginning of the path
+# to make sure our custom modules are found first
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Import and apply patches for Python 3.13 compatibility
+from twisted_patch import apply_twisted_patches
+apply_twisted_patches()
+
+from flask import Flask, render_template, request, jsonify
 import scrapy
 from scrapy.crawler import CrawlerProcess
 from scrapy import Selector
@@ -60,7 +71,14 @@ class DynamicSpider(scrapy.Spider):
         item = {}
         for field_name, selector in self.selectors.items():
             try:
-                item[field_name] = response.css(selector).get()
+                # Handle ::text selector correctly
+                if "::text" in selector:
+                    # Use get() for single text extraction
+                    item[field_name] = response.css(selector).get()
+                else:
+                    # Default case, try to get the element
+                    item[field_name] = response.css(selector).get()
+                    
                 self.logger.info(f"Extracted {field_name}: {item[field_name]}")
             except Exception as e:
                 self.logger.error(f"Error extracting {field_name}: {str(e)}")
@@ -292,18 +310,33 @@ def generate_selectors():
 
 def run_spider(start_url, selectors, output_file):
     try:
-        process = CrawlerProcess(settings={
+        # Fix path format for Windows and use absolute path
+        output_file = os.path.abspath(output_file).replace('\\', '/')
+        logger.info(f"Absolute output file path: {output_file}")
+        
+        # Create settings with proper URI format for feed exports
+        settings = {
             'FEEDS': {
-                output_file: {
+                f"file:///{output_file}": {
                     'format': 'json',
                     'overwrite': True,
                 },
             },
             'LOG_LEVEL': 'DEBUG'
-        })
+        }
+        
+        logger.info(f"Crawler process settings: {settings}")
+        process = CrawlerProcess(settings=settings)
         
         process.crawl(DynamicSpider, start_url=start_url, selectors=selectors)
         process.start()
+        
+        # Verify the file was created
+        if os.path.exists(output_file):
+            logger.info(f"Output file successfully created: {output_file}")
+        else:
+            logger.error(f"Output file was not created after scraping: {output_file}")
+            
     except Exception as e:
         logger.error(f"Error in run_spider: {str(e)}")
         raise
@@ -325,22 +358,79 @@ def scrape():
             logger.error(f"URL access error: {str(e)}")
             return jsonify({'error': f'Could not access URL: {str(e)}'}), 400
 
-        # Create a temporary file for output
-        with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as tmp:
-            output_file = tmp.name
+        # Create a temporary file for output that works with Windows paths
+        temp_dir = tempfile.gettempdir()
+        output_filename = f"scrapy_output_{int(time.time())}.json"
+        output_file = os.path.join(temp_dir, output_filename)
+        output_file_abs = os.path.abspath(output_file)
+        logger.info(f"Using temporary output file: {output_file_abs}")
         
         # Run the spider in a separate process
-        p = Process(target=run_spider, args=(start_url, selectors, output_file))
+        p = Process(target=run_spider, args=(start_url, selectors, output_file_abs))
         p.start()
         p.join()
         
+        # Check if the process ended successfully
+        if p.exitcode != 0:
+            logger.error(f"Spider process exited with code {p.exitcode}")
+            return jsonify({'error': f'Scraping process failed with exit code {p.exitcode}'}), 500
+        
         # Read the results
         try:
-            with open(output_file, 'r') as f:
-                results = json.load(f)
-            os.unlink(output_file)  # Clean up the temporary file
+            # Make sure file exists before trying to read
+            if not os.path.exists(output_file_abs):
+                logger.error(f"Output file not found: {output_file_abs}")
+                
+                # Fallback: Try direct scraping if multiprocess approach failed
+                logger.info("Trying direct scraping as fallback...")
+                try:
+                    # Fetch the page directly
+                    response = requests.get(start_url)
+                    response.raise_for_status()
+                    
+                    # Extract data using selectors
+                    selector = Selector(text=response.text)
+                    results = {}
+                    for field_name, css_selector in selectors.items():
+                        result = selector.css(css_selector).get()
+                        results[field_name] = result
+                    
+                    logger.info(f"Direct scraping results: {results}")
+                    return jsonify({'success': True, 'data': [results], 'note': 'Used direct scraping fallback'})
+                except Exception as e:
+                    logger.error(f"Direct scraping fallback also failed: {str(e)}")
+                    return jsonify({'error': 'Scraping completed but no output file was generated and direct scraping fallback failed'}), 500
+            
+            # Check file size
+            file_size = os.path.getsize(output_file_abs)
+            logger.info(f"Output file size: {file_size} bytes")
+            
+            if file_size == 0:
+                logger.error("Output file is empty")
+                return jsonify({'error': 'Scraping completed but output file is empty'}), 500
+                
+            with open(output_file_abs, 'r') as f:
+                content = f.read()
+                logger.info(f"Raw file content: {content[:100]}...")  # Log first 100 chars
+                
+                # Handle empty content
+                if not content.strip():
+                    logger.error("File content is empty or whitespace")
+                    return jsonify({'error': 'File content is empty'}), 500
+                
+                results = json.loads(content)
+                
+            # Clean up the temporary file
+            try:
+                os.unlink(output_file_abs)
+            except Exception as e:
+                logger.warning(f"Failed to delete temporary file: {str(e)}")
+                
             logger.info(f"Scraping results: {results}")
             return jsonify({'success': True, 'data': results})
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error: {str(e)}, Content: {content[:200] if 'content' in locals() else 'N/A'}")
+            return jsonify({'error': f'Error parsing results: {str(e)}'}), 500
         except Exception as e:
             logger.error(f"Error reading results: {str(e)}")
             return jsonify({'error': f'Error reading results: {str(e)}'}), 500

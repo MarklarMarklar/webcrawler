@@ -190,10 +190,10 @@ class LMStudioAPI:
             logger.info("Mock mode: Returning sample selectors")
             return {
                 "selectors": {
-                    "title": "h1.product_title",
-                    "price": "span.price",
-                    "description": "div.product_description p",
-                    "availability": "p.stock"
+                    "title": "h1.product_title::text",
+                    "price": "span.price::text",
+                    "description": "div.product_description p::text",
+                    "availability": "p.stock::text"
                 },
                 "mock": True
             }
@@ -262,7 +262,9 @@ class LMStudioAPI:
                     "You are an expert web scraper specializing in generating precise CSS selectors. "
                     "Given an HTML sample and user query, generate the most accurate CSS selectors "
                     "to extract the requested information. Format your response as JSON with "
-                    "selector names and their CSS selectors."
+                    "selector names and their CSS selectors.\n\n"
+                    "IMPORTANT: When extracting text content, always use the '::text' suffix in your selectors. "
+                    "For example, use '.price_color::text' to get the text content instead of '.price_color' which would return the HTML element."
                 )
             },
             {
@@ -272,7 +274,11 @@ class LMStudioAPI:
                     f"Query: {user_query}\n\n"
                     f"HTML Sample:\n```html\n{html_sample}\n```\n\n"
                     f"Please provide the CSS selectors in this format:\n"
-                    f"```json\n{{\n  \"field_name\": \"css_selector\",\n  \"another_field\": \"another_selector\"\n}}\n```\n\n"
+                    f"```json\n{{\n  \"field_name\": \"css_selector::text\",\n  \"another_field\": \"another_selector::text\"\n}}\n```\n\n"
+                    f"IMPORTANT: Always use '::text' suffix when extracting text content. For example:\n"
+                    f"- '.price_color::text' to get the price text\n"
+                    f"- '.product_main h1::text' to get the title text\n"
+                    f"- 'p.description::text' to get the description text\n\n"
                     f"If there's pagination or multiple items to scrape, also provide the selectors for those."
                 )
             }
