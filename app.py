@@ -145,8 +145,6 @@ class DynamicSpider(scrapy.Spider):
                 
                 # Only yield non-empty items
                 if item:
-                    # Add page number to item for reference
-                    item['_page'] = self.current_page
                     self.logger.info(f"Yielding item from page {self.current_page}: {item}")
                     yield item
                 else:
@@ -182,8 +180,6 @@ class DynamicSpider(scrapy.Spider):
                     self.logger.error(f"Error extracting {field_name}: {str(e)}")
             
             if item:
-                # Add page number to item for reference
-                item['_page'] = self.current_page
                 self.logger.info(f"Yielding single item from page {self.current_page}: {item}")
                 yield item
         
