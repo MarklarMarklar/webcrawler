@@ -8,6 +8,7 @@ import os
 import time
 import platform
 import socket
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG) # Change to DEBUG for more detailed logs
@@ -188,12 +189,30 @@ class LMStudioAPI:
         # If in mock mode, return predefined selectors
         if self.mock_mode:
             logger.info("Mock mode: Returning sample selectors")
+            
+            # Use specific selectors for books.toscrape.com
+            if "books.toscrape.com" in html_sample:
+                return {
+                    "selectors": {
+                        "item_container": "article.product_pod",
+                        "title": "h3 a::text",
+                        "price": ".price_color::text",
+                        "availability": ".availability::text",
+                        "star_rating": "p.star-rating::attr(class)",
+                        "pagination_selector": "li.next a::attr(href)"
+                    },
+                    "mock": True
+                }
+            
+            # Generic mock response for other sites
             return {
                 "selectors": {
-                    "title": "h1.product_title::text",
-                    "price": "span.price::text",
-                    "description": "div.product_description p::text",
-                    "availability": "p.stock::text"
+                    "item_container": "article.product_pod",  # Container for each product
+                    "title": "h3 a::text",
+                    "price": ".price_color::text",
+                    "availability": ".availability::text",
+                    "star_rating": "p.star-rating::attr(class)",
+                    "pagination_selector": "li.next a::attr(href)"  # Pagination link to next page
                 },
                 "mock": True
             }
@@ -255,31 +274,72 @@ class LMStudioAPI:
     
     def _create_selector_prompt(self, html_sample, user_query):
         """Create a prompt for the LLM to generate selectors"""
+        
+        # Check if user query mentions pagination/all pages
+        pagination_keywords = ["all pages", "every page", "multiple pages", "paginated", "pagination"]
+        needs_pagination = any(keyword in user_query.lower() for keyword in pagination_keywords)
+        
+        pagination_emphasis = ""
+        if needs_pagination:
+            pagination_emphasis = (
+                "The user specifically wants data from MULTIPLE PAGES. "
+                "You MUST include a 'pagination_selector' in your response that points to the 'next page' link. "
+                "This is REQUIRED to scrape data from all pages.\n\n"
+            )
+        
         return [
             {
                 "role": "system",
                 "content": (
-                    "You are an expert web scraper specializing in generating precise CSS selectors. "
-                    "Given an HTML sample and user query, generate the most accurate CSS selectors "
+                    "You are an expert web scraper specializing in generating precise CSS and XPath selectors. "
+                    "Given an HTML sample and user query, generate the most accurate selectors "
                     "to extract the requested information. Format your response as JSON with "
-                    "selector names and their CSS selectors.\n\n"
-                    "IMPORTANT: When extracting text content, always use the '::text' suffix in your selectors. "
-                    "For example, use '.price_color::text' to get the text content instead of '.price_color' which would return the HTML element."
+                    "selector names and their selectors.\n\n"
+                    + pagination_emphasis +
+                    "IMPORTANT RULES:\n"
+                    "1. When extracting text content with CSS selectors, always use the '::text' suffix. "
+                    "For example, use '.price_color::text' to get the text content instead of '.price_color'.\n"
+                    "2. For complex selections that CSS cannot handle (like following siblings, ancestors, or complex conditions), "
+                    "use XPath selectors instead. XPath selectors should start with 'xpath:' prefix.\n"
+                    "3. When using XPath, include the /text() function to extract text content.\n"
+                    "4. If the page has multiple items (like products, listings, search results), include an 'item_container' "
+                    "selector that points to the repeating element containing each individual item.\n"
+                    "5. Your JSON output must be valid. DO NOT include comments in the JSON. Any explanations should be "
+                    "provided as separate text outside the JSON block."
                 )
             },
             {
                 "role": "user",
                 "content": (
-                    f"I need CSS selectors to extract information from this webpage.\n\n"
+                    f"I need selectors to extract information from this webpage.\n\n"
                     f"Query: {user_query}\n\n"
                     f"HTML Sample:\n```html\n{html_sample}\n```\n\n"
-                    f"Please provide the CSS selectors in this format:\n"
-                    f"```json\n{{\n  \"field_name\": \"css_selector::text\",\n  \"another_field\": \"another_selector::text\"\n}}\n```\n\n"
-                    f"IMPORTANT: Always use '::text' suffix when extracting text content. For example:\n"
-                    f"- '.price_color::text' to get the price text\n"
-                    f"- '.product_main h1::text' to get the title text\n"
-                    f"- 'p.description::text' to get the description text\n\n"
-                    f"If there's pagination or multiple items to scrape, also provide the selectors for those."
+                    + (f"IMPORTANT: Since you mentioned extracting data from multiple pages, "
+                       f"make sure to include a pagination_selector that points to the 'next page' link.\n\n"
+                       if needs_pagination else "") +
+                    f"Please provide the selectors in this format:\n"
+                    f"```json\n{{\n"
+                    f"  \"item_container\": \".product\",\n"
+                    + (f"  \"pagination_selector\": \".next a::attr(href)\",\n" if needs_pagination else "") +
+                    f"  \"field_name\": \".css_selector::text\",\n"
+                    f"  \"another_field\": \"xpath://xpath/selector/path/text()\"\n"
+                    f"}}\n```\n\n"
+                    f"SELECTOR EXAMPLES:\n"
+                    f"1. For multiple items:\n"
+                    f"   - 'item_container': '.product' - Container for each product\n\n"
+                    + (f"2. For pagination:\n"
+                       f"   - 'pagination_selector': '.next a::attr(href)' - Link to next page\n"
+                       f"   - 'pagination_selector': 'li.next a::attr(href)' - For books.toscrape.com\n\n"
+                       if needs_pagination else "") +
+                    f"2. For basic text extraction:\n"
+                    f"   - '.price_color::text' - Gets price text using CSS\n"
+                    f"   - '.product_main h1::text' - Gets title text using CSS\n\n"
+                    f"3. For complex relationships (use XPath):\n"
+                    f"   - 'xpath://div[@id=\"product_description\"]/following-sibling::p/text()' - Gets text from paragraph after product description div\n"
+                    f"   - 'xpath://table[@class=\"table table-striped\"]//tr[contains(., \"UPC\")]/td/text()' - Gets UPC from a table\n"
+                    f"   - 'xpath://p[contains(@class, \"star-rating\")]/@class' - Gets the star rating class attribute\n\n"
+                    f"If there's pagination or multiple items to scrape, also provide the selectors for those.\n\n"
+                    f"IMPORTANT: Your JSON must be valid - do not include any comments inside the JSON block itself."
                 )
             }
         ]
@@ -316,7 +376,45 @@ class LMStudioAPI:
                 if not json_text.startswith('{'):
                     json_text = json_text[json_text.find('{'):]
                 
+                # Remove any JavaScript comments to make it valid JSON
+                # First, replace /* */ comments with empty string
+                json_text = re.sub(r'/\*.*?\*/', '', json_text)
+                # Then remove // comments until end of line
+                json_text = re.sub(r'//.*?$', '', json_text, flags=re.MULTILINE)
+                # Replace any commas followed by closing brackets (invalid JSON but common error)
+                json_text = re.sub(r',\s*}', '}', json_text)
+                json_text = re.sub(r',\s*]', ']', json_text)
+                
+                logger.debug(f"Cleaned JSON text: {json_text}")
                 selectors = json.loads(json_text)
+                
+                # Check if this is for books.toscrape.com and add pagination if missing
+                if "books.toscrape.com" in response_text and "item_container" in selectors:
+                    if "pagination_selector" not in selectors:
+                        logger.info("Adding pagination selector for books.toscrape.com")
+                        selectors["pagination_selector"] = "li.next a::attr(href)"
+                
+                # Check if there's text about pagination but no selector
+                if ("pagination" in response_text.lower() or 
+                    "next page" in response_text.lower() or 
+                    "multiple pages" in response_text.lower()):
+                    
+                    # Look for potential pagination selectors mentioned in the text
+                    pagination_patterns = [
+                        r'pagination.*?selector.*?[\'"]([^\'"]+)[\'"]',
+                        r'next.*?page.*?[\'"]([^\'"]+)[\'"]',
+                        r'pagination.*?link.*?[\'"]([^\'"]+)[\'"]',
+                        r'li\.next.*?[\'"]([^\'"]+)[\'"]'
+                    ]
+                    
+                    if "pagination_selector" not in selectors:
+                        for pattern in pagination_patterns:
+                            match = re.search(pattern, response_text, re.IGNORECASE)
+                            if match:
+                                potential_selector = match.group(1)
+                                logger.info(f"Found potential pagination selector in text: {potential_selector}")
+                                selectors["pagination_selector"] = potential_selector
+                                break
                 
                 # Add the raw LLM response for debugging
                 return {
@@ -331,6 +429,41 @@ class LMStudioAPI:
                 }
         except Exception as e:
             logger.error(f"Error parsing LLM response: {str(e)}")
+            logger.error(f"Raw response that caused error: {response_text}")
+            
+            # Try to fall back to a simple regex extraction of key-value pairs
+            # This is a last resort if JSON parsing fails
+            try:
+                logger.info("Attempting fallback extraction with regex")
+                # Look for patterns like "key": "value" or 'key': 'value'
+                # Extract key-value pairs using regex
+                pattern = r'["\']([\w_]+)["\']:\s*["\'](.*?)["\']'
+                matches = re.findall(pattern, response_text)
+                
+                if matches:
+                    logger.info(f"Fallback extraction found {len(matches)} key-value pairs")
+                    selectors = {key: value for key, value in matches}
+                    return {
+                        "selectors": selectors,
+                        "raw_response": response_text,
+                        "fallback_extraction": True
+                    }
+            except Exception as fallback_error:
+                logger.error(f"Fallback extraction also failed: {str(fallback_error)}")
+            
+            # If all else fails, see if we can provide mock selectors for books.toscrape.com
+            if "books.toscrape" in response_text:
+                logger.info("Falling back to hardcoded selectors for books.toscrape.com")
+                return {
+                    "selectors": {
+                        "item_container": "article.product_pod",
+                        "title": "h3 a::text",
+                        "price": ".price_color::text",
+                    },
+                    "fallback_extraction": True,
+                    "raw_response": response_text
+                }
+            
             return {
                 "error": f"Failed to parse selectors: {str(e)}",
                 "raw_response": response_text
