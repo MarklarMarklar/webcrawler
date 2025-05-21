@@ -197,6 +197,27 @@ pre {
     border-radius: 0 8px 8px 0;
 }
 
+/* Navigation Links as Buttons */
+.navigation-links a.nav-button {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    text-decoration: none;
+    margin-right: 0.5rem; /* Add some spacing between buttons */
+    display: inline-block; /* Ensures padding and margins are applied correctly */
+    transition: background-color 0.2s;
+}
+
+.navigation-links a.nav-button:hover {
+    background-color: var(--secondary-color);
+}
+
+.navigation-links a.nav-button.active {
+    background-color: var(--secondary-color); /* Or a different color for active state */
+    font-weight: bold;
+}
+
 /* Quick connect options */
 .quick-connect-options {
     display: flex;

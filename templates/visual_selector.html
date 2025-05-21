@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visual Selector</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--background-color);
+        }
+        .visual-container-override {
+            display: flex;
+            gap: 10px;
+            padding: 10px;
+            height: calc(100vh - 20px);
+        }
+        .controls {
+            flex: 1;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-y: auto;
+        }
+        .iframe-container {
+            flex: 2.5;
+            border: 1px solid #ccc;
+        }
+        iframe { width: 100%; height: 100%; border: none; }
+        label { display: block; margin-top: 10px; }
+        input[type="text"], textarea { width: 90%; padding: 8px; margin-top: 5px; }
+        button { padding: 10px 15px; margin-top: 15px; cursor: pointer; }
+        .selectors-output { margin-top: 20px; }
+        .selectors-output input { background-color: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <div style="padding: 10px 20px; background-color: #fff; border-bottom: 1px solid #eee;">
+        <h1 style="margin:0; display:inline-block;">Visual Selector</h1>
+        <a href="{{ url_for('index') }}" class="nav-button" style="float: right; margin-top:5px;">Back to Main Scraper</a>
+        <div style="clear:both;"></div>
+    </div>
+
+    <div class="visual-container-override">
+        <div class="controls">
+            <h2>Step 1: Load Page</h2>
+            <div>
+                <label for="start-url">Target URL:</label>
+                <input type="text" id="start-url" name="start-url" placeholder="https://example.com">
+            </div>
+            <div>
+                <label for="user-query">Describe what you want to extract (optional context for AI):</label>
+                <textarea id="user-query" name="user-query" rows="3" placeholder="e.g., product names and prices"></textarea>
+            </div>
+            <button id="load-page-btn">Load Page for Visual Selection</button>
+
+            <div class="selectors-output">
+                <h2>Step 2: Generated Selectors</h2>
+                <p>Click on elements in the loaded page to generate selectors.</p>
+                <div>
+                    <label for="pagination-selector">Pagination Selector (optional):</label>
+                    <input type="text" id="pagination-selector" name="pagination-selector" placeholder=".next > a::attr(href)">
+                </div>
+                <div>
+                    <label for="item-container-selector">Item Container Selector (for multiple items):</label>
+                    <input type="text" id="item-container-selector" name="item-container-selector" placeholder="article.product_pod">
+                </div>
+                <h3>Field Selectors:</h3>
+                <div id="field-selectors-list">
+                    <!-- Field selectors will be added here by JavaScript -->
+                    <!-- Example:
+                    <div>
+                        <label for="field-name-1">Field Name:</label>
+                        <input type="text" id="field-name-1" value="title" readonly>
+                        <label for="field-selector-1">Selector:</label>
+                        <input type="text" id="field-selector-1" value=".some-class > h2::text" readonly>
+                    </div>
+                    -->
+                </div>
+            </div>
+            <button id="use-these-selectors-btn" class="btn btn-primary mt-3">Use These Selectors & Go to Main Scraper</button>
+        </div>
+
+        <div class="iframe-container">
+            <iframe id="visual-selection-iframe" title="Target Page Content"></iframe>
+        </div>
+    </div>
+
+    <!-- We will add JavaScript interactions later -->
+    <!-- <script src="{{ url_for('static', filename='visual_selector.js') }}"></script> -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const loadPageBtn = document.getElementById('load-page-btn');
+            const startUrlInput = document.getElementById('start-url');
+            const iframe = document.getElementById('visual-selection-iframe');
+
+            loadPageBtn.addEventListener('click', function() {
+                const url = startUrlInput.value.trim();
+                if (url) {
+                    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                        alert('Please enter a valid URL (e.g., https://example.com)');
+                        return;
+                    }
+                    console.log('Requesting URL via proxy:', url);
+                    iframe.src = `/proxy-page?url=${encodeURIComponent(url)}`;
+                } else {
+                    alert('Please enter a URL.');
+                }
+            });
+
+            // Placeholder for iframe content loaded event (for future steps)
+            iframe.addEventListener('load', function() {
+                console.log('Iframe content loaded.');
+                try {
+                    const iframeDocument = iframe.contentDocument || iframe.contentWindow.document;
+
+                    // Style to highlight elements on hover
+                    const style = iframeDocument.createElement('style');
+                    style.textContent = `
+                        *:hover {
+                            outline: 2px solid red !important;
+                            cursor: pointer !important;
+                        }
+                    `;
+                    iframeDocument.head.appendChild(style);
+
+                    iframeDocument.body.addEventListener('click', function(e) {
+                        e.preventDefault(); // Prevent default click action (e.g., navigation)
+                        e.stopPropagation(); // Stop click from bubbling up
+
+                        const targetElement = e.target;
+                        const selector = generateCSSSelector(targetElement);
+                        
+                        // Ask user for a name for this selector
+                        const fieldName = prompt("Enter a name for this selector (e.g., title, price):", "field_name");
+                        if (fieldName && selector) {
+                            addSelectorToOutput(fieldName.trim(), selector);
+                        }
+                        console.log('Clicked element:', targetElement);
+                        console.log('Generated selector:', selector);
+
+                    }, true); // Use capturing phase to get the click first
+
+                } catch (err) {
+                    console.error("Error accessing iframe content or adding listeners:", err);
+                    if (err.name === 'SecurityError') {
+                        alert("Could not access iframe content due to security restrictions. The target page might be preventing interaction.");
+                    }
+                }
+            });
+
+            function generateCSSSelector(el) {
+                // More robust check for element-like nodes across iframe boundaries
+                if (!el || typeof el.nodeType !== 'number' || typeof el.nodeName !== 'string') {
+                    console.warn("generateCSSSelector: provided target does not appear to be a valid DOM node.", el);
+                    return ""; 
+                }
+                // Specifically check for Element node type (1)
+                if (el.nodeType !== 1) { 
+                    console.warn("generateCSSSelector: provided target is not an Element node (e.g., it might be a text node).", el);
+                    return "";
+                }
+
+                const path = [];
+                let currentEl = el; // Use a new variable for traversal
+                while (currentEl && currentEl.nodeType === Node.ELEMENT_NODE) {
+                    let selector = currentEl.nodeName.toLowerCase();
+                    if (currentEl.id) {
+                        selector += '#' + currentEl.id;
+                        path.unshift(selector);
+                        break; 
+                    } else {
+                        // For class names, let's try to add the first one if it exists, might make selectors more specific
+                        if (currentEl.classList && currentEl.classList.length > 0) {
+                            // Filter out any dynamically added classes by our script if necessary
+                            const firstClass = Array.from(currentEl.classList).find(cls => cls !== 'element-hover-highlight'); // Example filter
+                            if (firstClass) {
+                                selector += '.' + firstClass;
+                            }
+                        }
+                        let sib = currentEl, nth = 1;
+                        while (sib = sib.previousElementSibling) {
+                            if (sib.nodeName.toLowerCase() === currentEl.nodeName.toLowerCase()) {
+                                nth++;
+                            }
+                        }
+                        if (nth !== 1) {
+                            // Only add nth-of-type if no class was specific enough or if desired
+                            // For simplicity, let's assume if a class was added, nth-of-type might not be needed or could be too specific.
+                            // This logic can be refined. For now, if a class is added, we don't add nth-of-type.
+                            // If no class was added, we rely on nth-of-type.
+                            if (!selector.includes('.')) { // If no class was added
+                                selector += ":nth-of-type("+nth+")";
+                            }
+                        }
+                    }
+                    path.unshift(selector);
+                    if (currentEl.nodeName.toLowerCase() === 'html') break; // Stop at HTML tag
+                    currentEl = currentEl.parentNode;
+                }
+                return path.join(" > ");
+            }
+
+            function addSelectorToOutput(name, selector) {
+                const fieldSelectorsList = document.getElementById('field-selectors-list');
+                const fieldDiv = document.createElement('div');
+                fieldDiv.classList.add('field-selector-item', 'mb-2'); // Added mb-2 for spacing
+
+                // Sanitize name to create a valid ID
+                const safeName = name.replace(/[^a-zA-Z0-9_]/g, '_');
+
+                fieldDiv.innerHTML = `
+                    <div class="input-group">
+                        <span class="input-group-text" style="width: 120px;">${name}</span>
+                        <input type="text" class="form-control" id="field-selector-${safeName}" value="${selector}" readonly title="Click to copy selector">
+                        <button class="btn btn-sm btn-outline-secondary btn-copy-selector" type="button" data-clipboard-target="#field-selector-${safeName}" title="Copy Selector">Copy</button>
+                        <button class="btn btn-sm btn-outline-danger btn-remove-selector" type="button" title="Remove Selector">X</button>
+                    </div>
+                `;
+                fieldSelectorsList.appendChild(fieldDiv);
+
+                // Add event listener for the new copy button
+                const copyButton = fieldDiv.querySelector('.btn-copy-selector');
+                if (copyButton) { // Ensure button exists
+                    copyButton.addEventListener('click', function() {
+                        const targetInput = document.querySelector(this.dataset.clipboardTarget);
+                        if (targetInput) {
+                            targetInput.select();
+                            document.execCommand('copy');
+                            // Optionally, provide feedback
+                            const originalText = this.textContent;
+                            this.textContent = 'Copied!';
+                            setTimeout(() => { this.textContent = originalText; }, 1500);
+                        }
+                    });
+                }
+                 // Add event listener for the new remove button
+                const removeButton = fieldDiv.querySelector('.btn-remove-selector');
+                removeButton.addEventListener('click', function() {
+                    fieldDiv.remove();
+                });
+            }
+
+            // Initial event listeners for any pre-existing copy buttons (if any)
+            document.querySelectorAll('.btn-copy-selector').forEach(button => {
+                button.addEventListener('click', function() {
+                    const targetInput = document.querySelector(this.dataset.clipboardTarget);
+                    if (targetInput) {
+                        targetInput.select();
+                        document.execCommand('copy');
+                        const originalText = this.textContent;
+                        this.textContent = 'Copied!';
+                        setTimeout(() => { this.textContent = originalText; }, 1500);
+                    }
+                });
+            });
+
+            const useSelectorsBtn = document.getElementById('use-these-selectors-btn');
+            useSelectorsBtn.addEventListener('click', function() {
+                const collectedSelectors = {
+                    pagination_selector: document.getElementById('pagination-selector').value,
+                    item_container: document.getElementById('item-container-selector').value,
+                    fields: []
+                };
+
+                const fieldItems = document.querySelectorAll('#field-selectors-list .field-selector-item');
+                fieldItems.forEach(item => {
+                    const nameSpan = item.querySelector('.input-group-text');
+                    const selectorInput = item.querySelector('input[type="text"]');
+                    if (nameSpan && selectorInput) {
+                        collectedSelectors.fields.push({
+                            name: nameSpan.textContent.trim(),
+                            selector: selectorInput.value
+                        });
+                    }
+                });
+
+                // Also get the target URL from the visual selector page
+                const targetUrl = document.getElementById('start-url').value.trim();
+                if (targetUrl) {
+                    collectedSelectors.target_url = targetUrl;
+                }
+
+                console.log("Collected selectors for transfer:", collectedSelectors);
+                sessionStorage.setItem('visualScraperData', JSON.stringify(collectedSelectors));
+                window.location.href = "{{ url_for('index') }}"; // Redirect to main page
+            });
+
+        });
+    </script>
+</body>
+</html> 

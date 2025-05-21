@@ -20,7 +20,7 @@ from multiprocessing import Process, Queue
 import json
 import tempfile
 import logging
-from llm_api import LMStudioAPI, POTENTIAL_API_URLS, WSL_CONNECTION_TIMEOUT
+from llm_api import LMStudioAPI, POTENTIAL_API_URLS, WSL_CONNECTION_TIMEOUT, DEFAULT_API_URL
 from dotenv import load_dotenv
 import find_host_ip
 
@@ -227,83 +227,87 @@ class DynamicSpider(scrapy.Spider):
 def test_selector(url, selector, is_container=False):
     try:
         logger.info(f"Testing selector: {selector} on URL: {url}")
-        response = requests.get(url)
-        response.raise_for_status()  # Raise an exception for bad status codes
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
         
         sel = Selector(text=response.text)
-        
-        # Handle different selector types
+        elements = []
+
         if selector.startswith('xpath:'):
-            # Extract the XPath expression without the 'xpath:' prefix
             xpath_expr = selector[6:]
             logger.info(f"Using XPath selector: {xpath_expr}")
-            
-            if is_container:
-                # Get all elements
-                result = sel.xpath(xpath_expr)
-                count = len(result)
-                
-                # Get sample text from first element if available
-                sample = result[0].get() if count > 0 else None
-                return True, f"Found {count} elements. First element sample: {sample[:100]}..." if sample else ""
-            else:
-                # Get single element
-                result = sel.xpath(xpath_expr).get()
+            elements = sel.xpath(xpath_expr)
         else:
-            # Use CSS selector
-            if is_container:
-                # Get all elements
-                result = sel.css(selector)
-                count = len(result)
-                
-                # Get sample text from first element if available
-                sample = result[0].get() if count > 0 else None
-                return True, f"Found {count} elements. First element sample: {sample[:100]}..." if sample else ""
-            else:
-                # Get single element
-                result = sel.css(selector).get()
+            logger.info(f"Using CSS selector: {selector}")
+            elements = sel.css(selector)
         
-        logger.info(f"Selector test result: {result}")
-        
-        if result is None:
-            return False, "Selector returned no results"
+        match_count = len(elements)
+        logger.info(f"Found {match_count} elements for selector: {selector}")
+
+        if match_count == 0:
+            return {"success": False, "match_count": 0, "message": "Selector returned no results"}
+
+        if is_container:
+            first_element_html = elements[0].get()
+            return {
+                "success": True, 
+                "match_count": match_count, 
+                "message": f"Found {match_count} container elements.",
+                "html_snippet_sample": first_element_html[:500] + ('...' if len(first_element_html) > 500 else '')
+            }
+        else:
+            # Snippet for display is the element itself
+            html_snippet_display_content = elements[0].get()
+            # Snippet for LLM refinement is the parent element, if available
+            parent_element = elements[0].xpath("..")
+            html_snippet_for_llm = parent_element[0].get() if parent_element else html_snippet_display_content
             
-        # Clean the result if it's a string
-        if isinstance(result, str):
-            result = result.strip()
+            text_content_preview = "".join(elements[0].xpath(".//text()").getall()).strip()
             
-        return True, result
+            html_snippet_display_preview = html_snippet_display_content[:500] + ('...' if len(html_snippet_display_content) > 500 else '')
+            text_content_preview_display = text_content_preview[:200] + ('...' if len(text_content_preview) > 200 else '')
+
+            return {
+                "success": True, 
+                "match_count": match_count,
+                "message": f"Found {match_count} match(es). Previewing the first one.",
+                "html_snippet": html_snippet_for_llm, # Full parent snippet for LLM
+                "html_snippet_display": html_snippet_display_preview, # Snippet of the direct element for UI
+                "text_content_preview": text_content_preview_display
+            }
+
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout error fetching URL {url}: {str(e)}")
+        return {"success": False, "message": f"Timeout fetching URL: {url}"}
     except requests.exceptions.RequestException as e:
-        logger.error(f"Request error: {str(e)}")
-        return False, f"Failed to fetch URL: {str(e)}"
+        logger.error(f"Request error on URL {url}: {str(e)}")
+        return {"success": False, "message": f"Failed to fetch URL: {str(e)}"}
     except Exception as e:
-        logger.error(f"Selector error: {str(e)}")
-        return False, f"Error processing selector: {str(e)}"
+        logger.error(f"Error processing selector '{selector}' on {url}: {str(e)}")
+        return {"success": False, "message": f"Error processing selector: {str(e)}"}
 
 @app.route('/test-selector', methods=['POST'])
 def test_selector_route():
     try:
         data = request.json
         url = data.get('url')
-        selector = data.get('selector')
+        selector_str = data.get('selector')
         is_container = data.get('is_container', False)
         
-        if not url or not selector:
+        if not url or not selector_str:
             return jsonify({
                 'success': False,
-                'error': 'URL and selector are required'
+                'message': 'URL and selector are required'
             }), 400
         
-        success, result = test_selector(url, selector, is_container)
-        return jsonify({
-            'success': success,
-            'result': result
-        })
+        result_dict = test_selector(url, selector_str, is_container)
+        
+        return jsonify(result_dict)
     except Exception as e:
         logger.error(f"Error in test_selector_route: {str(e)}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'message': str(e)
         }), 500
 
 @app.route('/test-llm', methods=['GET'])
@@ -918,9 +922,60 @@ def scrape():
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
 
-@app.route('/', methods=['GET'])
+@app.route('/')
 def index():
-    return render_template('index.html')
+    logger.info("Rendering index page")
+    # Try to determine the best API URL for display if not already set or if it's the default
+    if llm_api.base_url == DEFAULT_API_URL and not llm_api.mock_mode:
+        llm_api._test_and_set_best_url() # Attempt to find a better one
+    return render_template(
+        'index.html', 
+        api_url=llm_api.base_url, 
+        is_mock_mode=llm_api.mock_mode,
+        potential_api_urls=POTENTIAL_API_URLS
+    )
+
+@app.route('/visual-selector')
+def visual_selector():
+    logger.info("Rendering visual selector page")
+    return render_template('visual_selector.html')
+
+@app.route('/proxy-page')
+def proxy_page():
+    target_url = request.args.get('url')
+    if not target_url:
+        return jsonify({'error': 'Missing URL parameter'}), 400
+
+    logger.info(f"Proxying request for URL: {target_url}")
+    try:
+        # It's good practice to set a timeout
+        # You might also want to add headers to mimic a browser, e.g., User-Agent
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(target_url, headers=headers, timeout=10)
+        response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
+        
+        # Important: To allow relative links/scripts/CSS within the proxied page to work correctly,
+        # we should inject a <base> tag into the <head> of the fetched HTML.
+        content = response.text
+        # A simple way to inject <base href="...">. More robust parsing might be needed for complex cases.
+        base_href_tag = f'<base href="{response.url}">' # Use the final URL after redirects
+        if '<head>' in content:
+            content = content.replace('<head>', '<head>\n' + base_href_tag, 1)
+        elif '<HEAD>' in content: # case insensitive for <head>
+            content = content.replace('<HEAD>', '<HEAD>\n' + base_href_tag, 1)
+        else:
+            # If no <head> tag, prepend (less ideal, but a fallback)
+            content = base_href_tag + content
+            
+        return content, 200, {'Content-Type': response.headers.get('content-type', 'text/html')}
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout when trying to fetch {target_url} for proxy.")
+        return jsonify({'error': 'Timeout fetching the URL'}), 504 # Gateway Timeout
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching URL {target_url} for proxy: {e}")
+        return jsonify({'error': f'Error fetching URL: {str(e)}'}), 502 # Bad Gateway
 
 @app.route('/api-status', methods=['GET'])
 def api_status():
@@ -938,6 +993,44 @@ def api_status():
         return jsonify({
             'success': False,
             'error': str(e)
+        }), 500
+
+@app.route('/refine-selector-via-llm', methods=['POST'])
+def refine_selector_llm_route():
+    try:
+        data = request.json
+        field_name = data.get('field_name')
+        original_selector = data.get('original_selector')
+        html_snippet = data.get('html_snippet')
+        user_query_context = data.get('user_query_context') # This might come from the main llm-query input
+
+        if not all([field_name, original_selector, html_snippet]):
+            return jsonify({
+                'success': False,
+                'error': 'Missing required fields: field_name, original_selector, or html_snippet.'
+            }), 400
+
+        # Call the new method in llm_api
+        # Ensure llm_api is the globally initialized one
+        result = llm_api.refine_single_selector(field_name, original_selector, html_snippet, user_query_context)
+
+        if result.get('success'):
+            return jsonify({
+                'success': True,
+                'data': result.get('data')
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.get('error', 'LLM refinement failed.'),
+                'raw_response': result.get('raw_response') # Pass raw response if available for debugging
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error in /refine-selector-via-llm route: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Server error in refinement route: {str(e)}'
         }), 500
 
 if __name__ == '__main__':

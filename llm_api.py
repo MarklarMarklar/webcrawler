@@ -190,21 +190,7 @@ class LMStudioAPI:
         if self.mock_mode:
             logger.info("Mock mode: Returning sample selectors")
             
-            # Use specific selectors for books.toscrape.com
-            if "books.toscrape.com" in html_sample:
-                return {
-                    "selectors": {
-                        "item_container": "article.product_pod",
-                        "title": "h3 a::text",
-                        "price": ".price_color::text",
-                        "availability": ".availability::text",
-                        "star_rating": "p.star-rating::attr(class)",
-                        "pagination_selector": "li.next a::attr(href)"
-                    },
-                    "mock": True
-                }
-            
-            # Generic mock response for other sites
+            # Generic mock response
             return {
                 "selectors": {
                     "item_container": "article.product_pod",  # Container for each product
@@ -328,8 +314,7 @@ class LMStudioAPI:
                     f"1. For multiple items:\n"
                     f"   - 'item_container': '.product' - Container for each product\n\n"
                     + (f"2. For pagination:\n"
-                       f"   - 'pagination_selector': '.next a::attr(href)' - Link to next page\n"
-                       f"   - 'pagination_selector': 'li.next a::attr(href)' - For books.toscrape.com\n\n"
+                       f"   - 'pagination_selector': '.next a::attr(href)' - Link to next page\n\n"
                        if needs_pagination else "") +
                     f"2. For basic text extraction:\n"
                     f"   - '.price_color::text' - Gets price text using CSS\n"
@@ -388,12 +373,6 @@ class LMStudioAPI:
                 logger.debug(f"Cleaned JSON text: {json_text}")
                 selectors = json.loads(json_text)
                 
-                # Check if this is for books.toscrape.com and add pagination if missing
-                if "books.toscrape.com" in response_text and "item_container" in selectors:
-                    if "pagination_selector" not in selectors:
-                        logger.info("Adding pagination selector for books.toscrape.com")
-                        selectors["pagination_selector"] = "li.next a::attr(href)"
-                
                 # Check if there's text about pagination but no selector
                 if ("pagination" in response_text.lower() or 
                     "next page" in response_text.lower() or 
@@ -451,20 +430,156 @@ class LMStudioAPI:
             except Exception as fallback_error:
                 logger.error(f"Fallback extraction also failed: {str(fallback_error)}")
             
-            # If all else fails, see if we can provide mock selectors for books.toscrape.com
-            if "books.toscrape" in response_text:
-                logger.info("Falling back to hardcoded selectors for books.toscrape.com")
-                return {
-                    "selectors": {
-                        "item_container": "article.product_pod",
-                        "title": "h3 a::text",
-                        "price": ".price_color::text",
-                    },
-                    "fallback_extraction": True,
-                    "raw_response": response_text
-                }
-            
             return {
                 "error": f"Failed to parse selectors: {str(e)}",
                 "raw_response": response_text
-            } 
+            }
+
+    def _create_refinement_prompt(self, field_name, original_selector, html_snippet, user_query_context):
+        """Creates the prompt for refining a single selector."""
+        system_message = (
+            "You are an expert web scraping assistant. Your task is to analyze an HTML snippet and a desired field name, "
+            "and then generate the BEST possible Scrapy CSS selector to extract that field\'s data from the snippet. "
+            "The goal is to create a selector that is both ACCURATE for this snippet and ROBUST enough to work on similar items on a page. "
+            "Prefer selectors using classes or IDs for robustness. Avoid overly long structural paths if a simpler, class/ID-based selector is possible."
+        )
+
+        example_json_title = json.dumps({
+            "refined_selector": "article.item > h2.heading",
+            "extraction_method": "text",
+            "extraction_detail": None,
+            "confidence": 0.95,
+            "notes": "Targeted the h2 element with class 'heading' inside 'article.item' for the title."
+        })
+        example_json_image = json.dumps({
+            "refined_selector": "div.photo > img",
+            "extraction_method": "attribute",
+            "extraction_detail": "src",
+            "confidence": 0.9,
+            "notes": "Targeted the img tag within 'div.photo' and specified 'src' attribute extraction."
+        })
+        user_prompt = "I want to extract the field named '" + field_name + "'.\n" \
+                    + "The broader scraping objective is: '" + (user_query_context if user_query_context else 'Not specified') + "'.\n" \
+                    + "The HTML snippet I'm looking at is below. This snippet was originally found using the selector: '" + original_selector + "' (this is just for context as to how the snippet was located).\n\n" \
+                    + "--- HTML SNIPPET ---\n" \
+                    + html_snippet + "\n" \
+                    + "--- END HTML SNIPPET ---\n\n" \
+                    + "Based on the HTML SNIPPET provided, please generate the most robust and accurate CSS selector to target the data for the field '" + field_name + "'.\n" \
+                    + "Then, specify the extraction method.\n" \
+                    + "For example:\n" \
+                    + "- If '" + field_name + "' implies text content (e.g., \"title\", \"price\"), the selector should point to the element containing the text. The extraction method will be \"text\".\n" \
+                    + "- If '" + field_name + "' implies a URL (e.g., \"image_url\", \"link\"), the selector should point to the element with the URL (e.g., an <img> or <a> tag). The extraction method will be \"attribute\", and you'll specify the attribute name (e.g., \"src\", \"href\").\n\n" \
+                    + "Your response MUST be a single, valid JSON object with the following keys:\n" \
+                    + "- \"refined_selector\": (string) The NEW, best CSS selector derived from the snippet for '" + field_name + "'. Make this as robust and concise as possible (e.g., prefer \'.class_name > .target_element\' over \'div > div > div > span\').\n" \
+                    + "- \"extraction_method\": (string) One of: \"text\", \"attribute\".\n" \
+                    + "- \"extraction_detail\": (string or null) If \"attribute\", this is the attribute name. Otherwise, null.\n" \
+                    + "- \"confidence\": (float) Score 0.0-1.0 for your suggestion.\n" \
+                    + "- \"notes\": (string) Brief explanation for your choice of selector and method.\n\n" \
+                    + "Example for field \"title\" if snippet is '<article class=\"item\"><h2 class=\"heading\">My Book Title</h2><p>...</p></article>':\n" \
+                    + "Response: " + example_json_title + "\n\n" \
+                    + "Example for field \"image_source\" if snippet is '<div class=\"photo\"><img src=\"/path/to/image.jpg\" alt=\"The image\"></div>':\n" \
+                    + "Response: " + example_json_image + "\n\n" \
+                    + "Focus on deriving the selector from the provided HTML snippet\'s structure and content to best capture the field '" + field_name + "'."
+        return [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_prompt}
+        ]
+
+    def refine_single_selector(self, field_name, original_selector, html_snippet, user_query_context):
+        """Asks the LLM to refine a single CSS selector based on an HTML snippet and field name."""
+        if self.mock_mode:
+            logger.info(f"Mock mode: Simulating selector refinement for field '{field_name}'")
+            # Simulate a common refinement based on field name
+            if "url" in field_name.lower() or "link" in field_name.lower() or "image" in field_name.lower() :
+                attr = "href" if "link" in field_name.lower() else "src"
+                return {
+                    "success": True,
+                    "data": {
+                        "refined_selector": original_selector,
+                        "extraction_method": "attribute",
+                        "extraction_detail": attr,
+                        "confidence": 0.85,
+                        "notes": f"Mock suggestion: Extract '{attr}' attribute."
+                    }
+                }
+            else: # Default to text extraction
+                return {
+                    "success": True,
+                    "data": {
+                        "refined_selector": original_selector, 
+                        "extraction_method": "text", 
+                        "extraction_detail": None,
+                        "confidence": 0.80, 
+                        "notes": "Mock suggestion: Extract text content."
+                    }
+                }
+
+        prompt_messages = self._create_refinement_prompt(field_name, original_selector, html_snippet, user_query_context)
+        
+        try:
+            logger.info(f"Sending selector refinement request to {self.base_url}/chat/completions for field '{field_name}'")
+            request_data = {
+                "model": "local-model", 
+                "messages": prompt_messages,
+                "temperature": 0.2, # Slightly higher for a bit more creativity if needed, but still low
+                "max_tokens": 500 # JSON response should be relatively small
+            }
+            logger.debug(f"Refinement API request data: {json.dumps(request_data)[:500]}...")
+
+            response = requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=self.headers,
+                json=request_data,
+                timeout=WSL_RESPONSE_TIMEOUT 
+            )
+            response.raise_for_status()
+            result = response.json()
+            logger.info("Successfully received JSON response from LLM API for refinement.")
+
+            if "choices" in result and result["choices"]:
+                content_str = result["choices"][0]["message"]["content"]
+                logger.debug(f"LLM refinement raw content: {content_str}")
+                try:
+                    # Extract JSON from potential markdown block
+                    json_text = content_str
+                    if "```json" in content_str:
+                        json_text = content_str.split("```json")[1].split("```")[0].strip()
+                    elif "```" in content_str: # Fallback for generic markdown block
+                        json_text = content_str.split("```")[1].split("```")[0].strip()
+                    
+                    # Ensure it's a valid JSON object (starts with { and ends with })
+                    # Some models might still add extra text outside the JSON block even if prompted not to.
+                    # We'll try to find the main JSON object.
+                    json_start_index = json_text.find('{')
+                    json_end_index = json_text.rfind('}')
+                    if json_start_index != -1 and json_end_index != -1 and json_end_index > json_start_index:
+                        json_text = json_text[json_start_index : json_end_index + 1]
+                    else:
+                        # If we can't find a clear '{...}' structure, this is likely not the JSON we want.
+                        logger.error(f"Could not isolate a valid JSON object structure in: {json_text}")
+                        return {"success": False, "error": "LLM response did not contain a clear JSON object.", "raw_response": content_str}
+
+                    # The LLM should directly return a JSON string as per the prompt
+                    llm_suggestion = json.loads(json_text)
+                    # Basic validation of expected keys
+                    expected_keys = ["refined_selector", "extraction_method", "extraction_detail", "confidence", "notes"]
+                    if all(key in llm_suggestion for key in expected_keys):
+                        return {"success": True, "data": llm_suggestion}
+                    else:
+                        logger.error(f"LLM refinement response missing expected keys: {llm_suggestion}")
+                        return {"success": False, "error": "LLM response did not contain all expected keys.", "raw_response": content_str}
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to decode JSON from LLM refinement response: {e}. Response: {content_str}")
+                    return {"success": False, "error": f"LLM response was not valid JSON: {e}", "raw_response": content_str}
+            else:
+                logger.error(f"Unexpected API response format for refinement: {result}")
+                return {"success": False, "error": "Unexpected API response format from LLM for refinement."}
+        except requests.exceptions.RequestException as e:
+            logger.error(f"LLM API request error during refinement: {str(e)}")
+            return {"success": False, "error": f"LLM API request error: {str(e)}"}
+        except Exception as e:
+            logger.error(f"An unexpected error occurred during selector refinement: {str(e)}")
+            return {"success": False, "error": f"An unexpected error occurred: {str(e)}"}
+
+# Helper for auto-discovery, might not be strictly necessary if URL is always provided
+# ... (rest of the file) 
