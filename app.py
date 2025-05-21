@@ -60,6 +60,15 @@ app.config['SECRET_KEY'] = os.urandom(24)
 # Initialize LM Studio API client with the discovered URL and forced mock mode setting
 llm_api = LMStudioAPI(base_url=api_url, mock_mode=use_mock_mode, skip_auto_discovery=True)
 
+# Common headers to mimic a browser
+COMMON_REQUEST_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'DNT': '1', # Do Not Track
+    'Upgrade-Insecure-Requests': '1'
+}
+
 class DynamicSpider(scrapy.Spider):
     name = 'dynamic_spider'
     
@@ -227,7 +236,7 @@ class DynamicSpider(scrapy.Spider):
 def test_selector(url, selector, is_container=False):
     try:
         logger.info(f"Testing selector: {selector} on URL: {url}")
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=10, headers=COMMON_REQUEST_HEADERS)
         response.raise_for_status()
         
         sel = Selector(text=response.text)
@@ -433,7 +442,7 @@ def generate_selectors():
         
         # Fetch the HTML content
         try:
-            response = requests.get(url)
+            response = requests.get(url, headers=COMMON_REQUEST_HEADERS)
             response.raise_for_status()
             html_content = response.text
             logger.info(f"Successfully fetched HTML content, length: {len(html_content)}")
@@ -574,7 +583,9 @@ def run_spider(start_url, selectors, output_file, export_format='json', page_lim
             'DOWNLOAD_TIMEOUT': request_timeout,
             'CONCURRENT_REQUESTS': 1,  # Reduce to avoid overwhelming the target site
             'DOWNLOAD_DELAY': 1,  # Add a 1 second delay between requests
-            'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            # Use the common headers for Scrapy requests as well
+            'DEFAULT_REQUEST_HEADERS': COMMON_REQUEST_HEADERS, 
+            'USER_AGENT': COMMON_REQUEST_HEADERS['User-Agent'], # Explicitly set UA too, though covered by DEFAULT_REQUEST_HEADERS
             'FEEDS': {
                 output_file: {
                     'format': export_format,
@@ -752,7 +763,7 @@ def scrape():
         # Test URL accessibility
         try:
             logger.info(f"Testing URL accessibility: {start_url}")
-            response = requests.head(start_url)
+            response = requests.head(start_url, headers=COMMON_REQUEST_HEADERS, timeout=10, allow_redirects=True)
             response.raise_for_status()
             logger.info("URL is accessible")
         except Exception as e:
@@ -949,11 +960,8 @@ def proxy_page():
     logger.info(f"Proxying request for URL: {target_url}")
     try:
         # It's good practice to set a timeout
-        # You might also want to add headers to mimic a browser, e.g., User-Agent
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(target_url, headers=headers, timeout=10)
+        # Using the common headers defined above
+        response = requests.get(target_url, headers=COMMON_REQUEST_HEADERS, timeout=10)
         response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
         
         # Important: To allow relative links/scripts/CSS within the proxied page to work correctly,
