@@ -37,8 +37,9 @@ load_dotenv()
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Get LLM API URL from environment variable or use the default
-api_url = os.environ.get("LM_STUDIO_API_URL", "http://172.31.64.1:1234/v1")
+# Initialize the LLM API client
+# Use environment variable if available, otherwise default to localhost
+api_url = os.environ.get("LM_STUDIO_API_URL", "http://localhost:1234/v1")
 logger.info(f"Using LM Studio API URL: {api_url}")
 
 # Check if we should use mock mode based on environment or connectivity issues
@@ -541,17 +542,15 @@ def generate_selectors():
         # Check if we're in mock mode
         if result.get("mock", False):
             logger.info("Using mock selectors due to LLM connectivity issues")
-            # If all else fails, see if we can provide mock selectors for books.toscrape.com
-            if "books.toscrape" in html_content:
-                logger.info("Falling back to hardcoded selectors for books.toscrape.com")
-                result["selectors"] = {
-                    "item_container": "article.product_pod",
-                    "title": "h3 a::text",
-                    "price": ".price_color::text",
-                    "pagination_selector": "li.next a::attr(href)"
-                }
-                result["fallback_extraction"] = True
-                result["raw_response"] = html_content
+            # Use generic fallback selectors instead of site-specific ones
+            result["selectors"] = {
+                "item_container": "article, .product, .item, .card",
+                "title": "h1, h2, h3 a, .title, .product-title::text",
+                "price": ".price, .price-amount, .product-price::text",
+                "pagination_selector": ".next a, .pagination a.next, a[rel='next']::attr(href)"
+            }
+            result["fallback_extraction"] = True
+            result["raw_response"] = html_content
                 
             return jsonify({
                 'success': True,
@@ -563,13 +562,13 @@ def generate_selectors():
         if result.get("fallback_extraction", False):
             logger.info("LLM response was parsed using fallback extraction method")
             
-            # For books.toscrape.com, add a container selector if not already there
-            if "books.toscrape" in url and "item_container" not in result["selectors"]:
-                result["selectors"]["item_container"] = "article.product_pod"
+            # Add generic container selector if not already there
+            if "item_container" not in result["selectors"]:
+                result["selectors"]["item_container"] = "article, .product, .item, .card"
                 
-            # For books.toscrape.com, add a pagination selector if not already there
-            if "books.toscrape" in url and "pagination_selector" not in result["selectors"]:
-                result["selectors"]["pagination_selector"] = "li.next a::attr(href)"
+            # Add generic pagination selector if not already there
+            if "pagination_selector" not in result["selectors"]:
+                result["selectors"]["pagination_selector"] = ".next a, .pagination a.next, a[rel='next']::attr(href)"
                 
             return jsonify({
                 'success': True,
@@ -582,13 +581,8 @@ def generate_selectors():
         if any(keyword in query.lower() for keyword in all_pages_keywords):
             logger.info("User query mentions pagination, ensuring pagination selector is included")
             
-            # For books.toscrape.com, add the pagination selector if not already provided
-            if "books.toscrape" in url and "pagination_selector" not in result["selectors"]:
-                logger.info("Adding pagination selector for books.toscrape.com based on user query")
-                result["selectors"]["pagination_selector"] = "li.next a::attr(href)"
-                
-            # For other sites, try to find a common pagination pattern if not already provided
-            elif "pagination_selector" not in result["selectors"]:
+            # For any site, try to find a common pagination pattern if not already provided
+            if "pagination_selector" not in result["selectors"]:
                 # Look for common pagination elements in the HTML
                 pagination_patterns = [
                     "li.next a", ".pagination .next", ".pagination a.next", 
@@ -606,14 +600,20 @@ def generate_selectors():
                             result["selectors"]["pagination_selector"] = f"{pattern} a::attr(href)"
                         break
         
-        # For books.toscrape.com, add a container selector if not already there
-        if "books.toscrape" in url and "item_container" not in result["selectors"]:
-            result["selectors"]["item_container"] = "article.product_pod"
+        # Try to detect common container elements if not already provided
+        if "item_container" not in result["selectors"]:
+            container_patterns = [
+                "article", ".product", ".item", ".card", ".product-item",
+                ".listing-item", ".result-item", ".search-result"
+            ]
             
-        # For books.toscrape.com, add a pagination selector if not already there
-        if "books.toscrape" in url and "pagination_selector" not in result["selectors"]:
-            result["selectors"]["pagination_selector"] = "li.next a::attr(href)"
-            
+            sel = Selector(text=html_content)
+            for pattern in container_patterns:
+                if sel.css(pattern) and len(sel.css(pattern)) > 1:  # Multiple items found
+                    logger.info(f"Found potential container selector: {pattern}")
+                    result["selectors"]["item_container"] = pattern
+                    break
+        
         return jsonify({
             'success': True,
             'selectors': result["selectors"]
@@ -1132,4 +1132,6 @@ def refine_selector_llm_route():
         }), 500
 
 if __name__ == '__main__':
-    app.run(debug=True) 
+    # Use port 5000 explicitly for consistency with documentation
+    # Use host 0.0.0.0 to make it accessible from other devices on the network
+    app.run(host='0.0.0.0', port=5000, debug=True) 

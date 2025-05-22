@@ -42,7 +42,7 @@
                         {% for p_url in potential_api_urls %}
                             <button type="button" class="btn btn-sm btn-light quick-connect" data-url="{{ p_url }}">{{ p_url.split(':')[1].replace('//','') }}</button>
                         {% endfor %}
-                    </div>
+                </div>
                     <div class="form-check mt-2">
                         <input type="checkbox" class="form-check-input" id="use-mock-mode" name="use_mock_mode" {% if is_mock_mode %}checked{% endif %}>
                         <label class="form-check-label" for="use-mock-mode">Use Mock Mode (work offline)</label>
@@ -91,17 +91,17 @@
                             <button type="button" class="btn btn-sm btn-danger page-limit-button max-button" data-value="0">MAX</button>
                         </div>
                         <small class="form-text text-muted">Limit pages (use MAX for all).</small>
-                    </div>
+                </div>
 
                     <div class="form-group mb-3">
                         <label for="item-container" class="form-label">Item Container Selector (for multiple items):</label>
                         <div class="input-group">
                             <input type="text" class="form-control" id="item-container" name="item_container" placeholder="article.product_pod">
                             <button type="button" class="btn btn-outline-secondary test-container">Test Container</button>
-                </div>
+                    </div>
                         <small class="form-text text-muted">Selector for the repeating element for each item.</small>
                         <div id="container-test-result" class="mt-1 form-text"></div>
-                    </div>
+                </div>
 
                     <h3 class="h5 mt-3">Field Selectors</h3>
                     <div id="selectors-container" class="mb-2">
@@ -111,9 +111,9 @@
                             <input type="text" class="form-control field-selector" placeholder="CSS or XPath selector" required>
                             <button type="button" class="btn btn-sm btn-outline-info test-selector">Test</button>
                             <button type="button" class="btn btn-sm btn-outline-danger remove-selector">Remove</button>
-                </div>
-                        <div class="test-result form-text mb-2"></div> <!-- Test result below each item -->
                     </div>
+                        <div class="test-result form-text mb-2"></div> <!-- Test result below each item -->
+                </div>
                     <button type="button" id="add-selector" class="btn btn-success btn-sm mb-3">Add Field</button>
 
                     <div class="form-group mb-3">
@@ -129,7 +129,7 @@
                     <label class="form-check-label" for="render-js-in-spider">
                         Use JavaScript rendering for scraping (slower, for complex sites)
                     </label>
-                </div>
+                    </div>
 
                     <div class="form-group mb-3">
                         <label for="save-path" class="form-label">Save Path:</label>
@@ -337,7 +337,7 @@
                         // If there was an error, but we have visual data, try to load that
                         if (dataString) {
                             processVisualScraperData(dataString);
-                        } else {
+                } else {
                             addSelectorRow(); // Add a default row
                         }
                     }
@@ -511,36 +511,36 @@
             button.addEventListener('click', function() {
                     document.getElementById('api-url').value = this.getAttribute('data-url');
                     document.getElementById('update-api').click(); // Trigger update
-                });
+            });
         });
 
         // Generate selectors using the LLM
             const generateSelectorsButton = document.getElementById('generate-selectors');
             if (generateSelectorsButton) {
                 generateSelectorsButton.addEventListener('click', async function() {
-                    const url = document.getElementById('start-url').value;
-                    const query = document.getElementById('llm-query').value;
+            const url = document.getElementById('start-url').value;
+            const query = document.getElementById('llm-query').value;
                     const llmStatusEl = document.getElementById('llm-status');
                     const button = this;
             
-                    if (!url || !query) {
+            if (!url || !query) {
                         llmStatusEl.innerHTML = 'Please enter both URL and query.';
                         llmStatusEl.className = 'status-error';
-                        return;
-                    }
+                return;
+            }
                     button.disabled = true;
                     button.textContent = 'Generating...';
                     llmStatusEl.innerHTML = 'Asking AI to generate selectors...';
                     llmStatusEl.className = 'status-info';
             
-                    try {
-                        const response = await fetch('/generate-selectors', {
-                            method: 'POST',
+            try {
+                const response = await fetch('/generate-selectors', {
+                    method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ url, query })
-                        });
-                        const data = await response.json();
-                        if (data.success) {
+                    body: JSON.stringify({ url, query })
+                });
+                const data = await response.json();
+                if (data.success) {
                             llmStatusEl.innerHTML = '✓ Selectors generated successfully!';
                             llmStatusEl.className = 'status-ok';
                             if (data.warning) llmStatusEl.innerHTML += ` <span class="status-warning">(${data.warning})</span>`;
@@ -563,15 +563,15 @@
                             
                             // Update container and pagination from response if provided
                             const selectors = data.selectors;
-                            if (selectors.item_container) {
-                                document.getElementById('item-container').value = selectors.item_container;
-                                delete selectors.item_container;
-                            }
-                            if (selectors.pagination_selector) {
-                                document.getElementById('pagination-selector').value = selectors.pagination_selector;
-                                delete selectors.pagination_selector;
-                            }
-                            
+                    if (selectors.item_container) {
+                        document.getElementById('item-container').value = selectors.item_container;
+                        delete selectors.item_container;
+                    }
+                    if (selectors.pagination_selector) {
+                        document.getElementById('pagination-selector').value = selectors.pagination_selector;
+                        delete selectors.pagination_selector;
+                    }
+                    
                             // First add the newly generated selectors
                             for (const [fieldName, selectorValue] of Object.entries(selectors)) {
                                 addSelectorRow(fieldName, selectorValue);
@@ -595,15 +595,15 @@
                                 testContainerOrField(document.getElementById('pagination-selector').value, document.getElementById('pagination-test-result'), false, null, true);
                             }
 
-                        } else {
+                } else {
                             llmStatusEl.innerHTML = `✗ Error generating selectors: ${data.error}`;
                             llmStatusEl.className = 'status-error';
-                        }
-                    } catch (error) {
+                }
+            } catch (error) {
                         console.error('Generate selectors error:', error);
                         llmStatusEl.innerHTML = `✗ Error: ${error.message}`;
                         llmStatusEl.className = 'status-error';
-                    } finally {
+            } finally {
                         button.disabled = false;
                         button.textContent = 'Generate Selectors';
                     }
@@ -766,7 +766,7 @@
                             autoTestDiv.innerHTML = `<p class="text-danger">✗ Auto-test of AI selector: ${autoTest.message || autoTest.error || 'Failed'}</p>`;
                             suggestionDiv.classList.remove('alert-info');
                             suggestionDiv.classList.add('alert-warning'); // Make it yellow/orange if auto-test failed
-                        } else {
+                } else {
                             autoTestDiv.innerHTML = `<p class="text-warning">Auto-test results not available.</p>`;
                         }
                         suggestionDiv.appendChild(autoTestDiv);
@@ -876,12 +876,12 @@
             // So, the '#add-selector' button is the primary way to add rows manually after page load.
 
             // Handle form submission for scraping
-            document.getElementById('scraper-form').addEventListener('submit', async function(e) {
-                e.preventDefault();
-                const url = document.getElementById('start-url').value;
+        document.getElementById('scraper-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const url = document.getElementById('start-url').value;
                 const formSelectors = {};
-                let hasErrors = false;
-                
+            let hasErrors = false;
+            
                 document.querySelectorAll('#selectors-container .selector-item').forEach(item => {
                     const fieldNameInput = item.querySelector('.field-name');
                     const selectorInput = item.querySelector('.field-selector');
@@ -894,21 +894,21 @@
                     if (!fieldName || !selectorValue) {
                         if (!fieldName) fieldNameInput.classList.add('is-invalid');
                         if (!selectorValue) selectorInput.classList.add('is-invalid');
-                        hasErrors = true;
+                    hasErrors = true;
                     } else {
                         formSelectors[fieldName] = selectorValue;
-                    }
-                });
-
-                const resultsDiv = document.getElementById('results');
-                if (hasErrors) {
-                    resultsDiv.innerHTML = '<div class="alert alert-danger">Please fill in all field names and selectors.</div>';
-                    return;
                 }
-                
-                const itemContainer = document.getElementById('item-container').value;
+            });
+            
+                const resultsDiv = document.getElementById('results');
+            if (hasErrors) {
+                    resultsDiv.innerHTML = '<div class="alert alert-danger">Please fill in all field names and selectors.</div>';
+                return;
+            }
+            
+            const itemContainer = document.getElementById('item-container').value;
                 if (itemContainer) formSelectors['item_container'] = itemContainer;
-                const paginationSelector = document.getElementById('pagination-selector').value;
+            const paginationSelector = document.getElementById('pagination-selector').value;
                 if (paginationSelector) formSelectors['pagination_selector'] = paginationSelector;
                 
                 // Save the form state before submitting
@@ -916,8 +916,8 @@
                 
                 resultsDiv.innerHTML = '<div class="alert alert-info">Scraping in progress...</div>';
                 const scrapeButton = this.querySelector('button[type="submit"]');
-                scrapeButton.disabled = true;
-                scrapeButton.textContent = 'Scraping...';
+                    scrapeButton.disabled = true;
+                    scrapeButton.textContent = 'Scraping...';
                 
                 try {
                 const response = await fetch('/scrape', {
@@ -945,7 +945,7 @@
                             resultHTML += '<p>No data returned, or data was empty.</p>';
                         }
                         resultsDiv.innerHTML = resultHTML;
-                    } else {
+                } else {
                         resultsDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.error}</div>`;
                 }
             } catch (error) {
@@ -982,9 +982,9 @@
             }
 
             // Page limit buttons
-            document.querySelectorAll('.page-limit-button').forEach(button => {
-                button.addEventListener('click', function() {
-                    document.getElementById('page-limit').value = this.getAttribute('data-value');
+        document.querySelectorAll('.page-limit-button').forEach(button => {
+            button.addEventListener('click', function() {
+                document.getElementById('page-limit').value = this.getAttribute('data-value');
                     // Save state after changing page limit
                     saveMainPageState();
                 });

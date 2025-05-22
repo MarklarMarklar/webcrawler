@@ -14,21 +14,24 @@ import re
 logging.basicConfig(level=logging.DEBUG) # Change to DEBUG for more detailed logs
 logger = logging.getLogger(__name__)
 
-# Default LM Studio API URL - using the IP from user's log
-DEFAULT_API_URL = "http://172.31.64.1:1234/v1"
+# Default LM Studio API URL - prioritize environment variable
+DEFAULT_API_URL = os.environ.get("LM_STUDIO_API_URL", "http://localhost:1234/v1")
 
 # Use much longer timeouts for WSL-Windows connections
 WSL_CONNECTION_TIMEOUT = 60
 WSL_RESPONSE_TIMEOUT = 120
 CONNECTION_TIMEOUT = WSL_CONNECTION_TIMEOUT
 
-# List of possible connection URLs to try
+# List of possible connection URLs to try in order of preference
 POTENTIAL_API_URLS = [
-    "http://172.31.64.1:1234/v1",    # IP address from logs
-    "http://host.docker.internal:1234/v1",  # Docker/WSL connection to host
-    "http://localhost:1234/v1",      # Local connection
-    "http://127.0.0.1:1234/v1",      # Localhost IP
+    os.environ.get("LM_STUDIO_API_URL", ""),  # Environment variable takes precedence
+    "http://localhost:1234/v1",       # Standard local connection
+    "http://127.0.0.1:1234/v1",       # Alternative localhost
+    "http://host.docker.internal:1234/v1"  # Docker/WSL connection to host
 ]
+
+# Filter out empty URLs
+POTENTIAL_API_URLS = [url for url in POTENTIAL_API_URLS if url]
 
 class LMStudioAPI:
     """
@@ -190,15 +193,15 @@ class LMStudioAPI:
         if self.mock_mode:
             logger.info("Mock mode: Returning sample selectors")
             
-            # Generic mock response
+            # Generic mock response with common patterns found across various websites
             return {
                 "selectors": {
-                    "item_container": "article.product_pod",  # Container for each product
-                    "title": "h3 a::text",
-                    "price": ".price_color::text",
-                    "availability": ".availability::text",
-                    "star_rating": "p.star-rating::attr(class)",
-                    "pagination_selector": "li.next a::attr(href)"  # Pagination link to next page
+                    "item_container": "article, .product, .item, .card",
+                    "title": "h1, h2, h3 a, .title::text",
+                    "price": ".price, .amount, .product-price::text",
+                    "description": ".description, .product-description, .content p::text",
+                    "image": "img, .product-image, .main-image::attr(src)",
+                    "pagination_selector": ".pagination a.next, a.next, .next a, [rel='next']::attr(href)"
                 },
                 "mock": True
             }
