@@ -14,6 +14,7 @@
         <div class="navigation-links mb-3">
             <a href="{{ url_for('index') }}" class="nav-button active">Basic Scraper</a>
             <a href="{{ url_for('visual_selector') }}" class="nav-button">Visual Selector</a>
+            <button id="new-session-btn" class="nav-button" style="float: right; background-color: #6b7280;">New Scraping Session</button>
             <!-- If you had an 'Enhanced Scraper' link, it would go here -->
             <!-- <a href="/enhanced" class="nav-link">Enhanced Scraper with Link Navigation</a> -->
         </div>
@@ -996,6 +997,44 @@
                     document.getElementById('mock-mode-banner').style.display = 'none';
                 });
             }
+            
+            // New Scraping Session button
+            document.getElementById('new-session-btn').addEventListener('click', function() {
+                if (confirm('This will clear all current selectors and form data. Start a new scraping session?')) {
+                    // Clear all sessionStorage data related to our app
+                    sessionStorage.removeItem('mainPageState');
+                    sessionStorage.removeItem('visualScraperData');
+                    sessionStorage.removeItem('visualSelectorUrl');
+                    sessionStorage.removeItem('visualSelectorFieldSelectors');
+                    sessionStorage.removeItem('visualSelectorPaginationSelector');
+                    sessionStorage.removeItem('visualSelectorItemContainerSelector');
+                    
+                    // Reset the form
+                    document.getElementById('start-url').value = '';
+                    document.getElementById('pagination-selector').value = '';
+                    document.getElementById('item-container').value = '';
+                    document.getElementById('render-js-in-spider').checked = false;
+                    document.getElementById('llm-query').value = '';
+                    document.getElementById('page-limit').value = '10';
+                    document.getElementById('export-format').value = 'json';
+                    document.getElementById('save-path').value = '';
+                    
+                    // Clear the results area
+                    document.getElementById('results').innerHTML = '';
+                    
+                    // Clear all test results
+                    document.getElementById('pagination-test-result').innerHTML = '';
+                    document.getElementById('container-test-result').innerHTML = '';
+                    
+                    // Clear all selector rows and add a single empty one
+                    const selectorsContainer = document.getElementById('selectors-container');
+                    selectorsContainer.innerHTML = '';
+                    addSelectorRow();
+                    
+                    // Provide feedback
+                    alert('New scraping session started! All data has been reset.');
+                }
+            });
         });
     </script>
 </body>

@@ -40,6 +40,7 @@
     <div style="padding: 10px 20px; background-color: #fff; border-bottom: 1px solid #eee;">
         <h1 style="margin:0; display:inline-block;">Visual Selector</h1>
         <a href="{{ url_for('index') }}" class="nav-button" style="float: right; margin-top:5px;">Back to Main Scraper</a>
+        <button id="new-session-btn" class="nav-button" style="float: right; margin-top:5px; margin-right:10px; background-color: #6b7280;">New Scraping Session</button>
         <div style="clear:both;"></div>
     </div>
 
@@ -50,23 +51,11 @@
                 <label for="start-url">Target URL:</label>
                 <input type="text" id="start-url" name="start-url" placeholder="https://example.com">
             </div>
-            <div>
-                <label for="user-query">Describe what you want to extract (optional context for AI):</label>
-                <textarea id="user-query" name="user-query" rows="3" placeholder="e.g., product names and prices"></textarea>
-            </div>
             <button id="load-page-btn">Load Page for Visual Selection</button>
 
             <div class="selectors-output">
                 <h2>Step 2: Generated Selectors</h2>
                 <p>Click on elements in the loaded page to generate selectors.</p>
-                <div>
-                    <label for="pagination-selector">Pagination Selector (optional):</label>
-                    <input type="text" id="pagination-selector" name="pagination-selector" placeholder=".next > a::attr(href)">
-                </div>
-                <div>
-                    <label for="item-container-selector">Item Container Selector (for multiple items):</label>
-                    <input type="text" id="item-container-selector" name="item-container-selector" placeholder="article.product_pod">
-                </div>
                 <h3>Field Selectors:</h3>
                 <div id="field-selectors-list">
                     <!-- Field selectors will be added here by JavaScript -->
@@ -104,17 +93,6 @@
                     // If there's a saved URL, automatically load it in the iframe
                     console.log('Loading previously saved URL from sessionStorage:', savedUrl);
                     iframe.src = `/proxy-page?url=${encodeURIComponent(savedUrl)}`;
-                }
-                
-                // Also load any saved selectors
-                const savedPaginationSelector = sessionStorage.getItem('visualSelectorPaginationSelector');
-                if (savedPaginationSelector) {
-                    document.getElementById('pagination-selector').value = savedPaginationSelector;
-                }
-                
-                const savedItemContainerSelector = sessionStorage.getItem('visualSelectorItemContainerSelector');
-                if (savedItemContainerSelector) {
-                    document.getElementById('item-container-selector').value = savedItemContainerSelector;
                 }
                 
                 // Load saved field selectors if any
@@ -212,17 +190,6 @@
                 });
                 
                 sessionStorage.setItem('visualSelectorFieldSelectors', JSON.stringify(fields));
-                
-                // Also save pagination and container selectors
-                const paginationSelector = document.getElementById('pagination-selector').value;
-                if (paginationSelector) {
-                    sessionStorage.setItem('visualSelectorPaginationSelector', paginationSelector);
-                }
-                
-                const itemContainerSelector = document.getElementById('item-container-selector').value;
-                if (itemContainerSelector) {
-                    sessionStorage.setItem('visualSelectorItemContainerSelector', itemContainerSelector);
-                }
             }
 
             function generateCSSSelector(el) {
@@ -333,20 +300,9 @@
                 });
             });
 
-            // Event listeners for input changes to save container and pagination selectors
-            document.getElementById('pagination-selector').addEventListener('input', function() {
-                sessionStorage.setItem('visualSelectorPaginationSelector', this.value);
-            });
-            
-            document.getElementById('item-container-selector').addEventListener('input', function() {
-                sessionStorage.setItem('visualSelectorItemContainerSelector', this.value);
-            });
-
             const useSelectorsBtn = document.getElementById('use-these-selectors-btn');
             useSelectorsBtn.addEventListener('click', function() {
                 const collectedSelectors = {
-                    pagination_selector: document.getElementById('pagination-selector').value,
-                    item_container: document.getElementById('item-container-selector').value,
                     fields: []
                 };
 
@@ -377,6 +333,30 @@
                 window.location.href = "{{ url_for('index') }}"; // Redirect to main page
             });
 
+            // New Scraping Session button
+            document.getElementById('new-session-btn').addEventListener('click', function() {
+                if (confirm('This will clear all current selectors and form data. Start a new scraping session?')) {
+                    // Clear all sessionStorage data related to our app
+                    sessionStorage.removeItem('mainPageState');
+                    sessionStorage.removeItem('visualScraperData');
+                    sessionStorage.removeItem('visualSelectorUrl');
+                    sessionStorage.removeItem('visualSelectorFieldSelectors');
+                    sessionStorage.removeItem('visualSelectorPaginationSelector');
+                    sessionStorage.removeItem('visualSelectorItemContainerSelector');
+                    
+                    // Reset the form
+                    document.getElementById('start-url').value = '';
+                    
+                    // Clear the iframe
+                    document.getElementById('visual-selection-iframe').src = '';
+                    
+                    // Clear field selectors list
+                    document.getElementById('field-selectors-list').innerHTML = '';
+                    
+                    // Provide feedback
+                    alert('New scraping session started! All data has been reset.');
+                }
+            });
         });
     </script>
 </body>
