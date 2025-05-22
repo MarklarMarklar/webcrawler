@@ -95,6 +95,44 @@
             const loadPageBtn = document.getElementById('load-page-btn');
             const startUrlInput = document.getElementById('start-url');
             const iframe = document.getElementById('visual-selection-iframe');
+            
+            // Load URL from sessionStorage if available
+            function loadSavedUrlAndState() {
+                const savedUrl = sessionStorage.getItem('visualSelectorUrl');
+                if (savedUrl) {
+                    startUrlInput.value = savedUrl;
+                    // If there's a saved URL, automatically load it in the iframe
+                    console.log('Loading previously saved URL from sessionStorage:', savedUrl);
+                    iframe.src = `/proxy-page?url=${encodeURIComponent(savedUrl)}`;
+                }
+                
+                // Also load any saved selectors
+                const savedPaginationSelector = sessionStorage.getItem('visualSelectorPaginationSelector');
+                if (savedPaginationSelector) {
+                    document.getElementById('pagination-selector').value = savedPaginationSelector;
+                }
+                
+                const savedItemContainerSelector = sessionStorage.getItem('visualSelectorItemContainerSelector');
+                if (savedItemContainerSelector) {
+                    document.getElementById('item-container-selector').value = savedItemContainerSelector;
+                }
+                
+                // Load saved field selectors if any
+                const savedFieldSelectors = sessionStorage.getItem('visualSelectorFieldSelectors');
+                if (savedFieldSelectors) {
+                    try {
+                        const fields = JSON.parse(savedFieldSelectors);
+                        fields.forEach(field => {
+                            addSelectorToOutput(field.name, field.selector);
+                        });
+                    } catch (e) {
+                        console.error("Error parsing saved field selectors:", e);
+                    }
+                }
+            }
+            
+            // Call on page load
+            loadSavedUrlAndState();
 
             loadPageBtn.addEventListener('click', function() {
                 const url = startUrlInput.value.trim();
@@ -105,6 +143,9 @@
                     }
                     console.log('Requesting URL via proxy:', url);
                     iframe.src = `/proxy-page?url=${encodeURIComponent(url)}`;
+                    
+                    // Save URL to sessionStorage
+                    sessionStorage.setItem('visualSelectorUrl', url);
                 } else {
                     alert('Please enter a URL.');
                 }
@@ -137,6 +178,9 @@
                         const fieldName = prompt("Enter a name for this selector (e.g., title, price):", "field_name");
                         if (fieldName && selector) {
                             addSelectorToOutput(fieldName.trim(), selector);
+                            
+                            // Save field selectors to sessionStorage
+                            saveFieldSelectorsToStorage();
                         }
                         console.log('Clicked element:', targetElement);
                         console.log('Generated selector:', selector);
@@ -150,6 +194,36 @@
                     }
                 }
             });
+            
+            // Function to save field selectors to sessionStorage
+            function saveFieldSelectorsToStorage() {
+                const fieldItems = document.querySelectorAll('#field-selectors-list .field-selector-item');
+                const fields = [];
+                
+                fieldItems.forEach(item => {
+                    const nameSpan = item.querySelector('.input-group-text');
+                    const selectorInput = item.querySelector('input[type="text"]');
+                    if (nameSpan && selectorInput) {
+                        fields.push({
+                            name: nameSpan.textContent.trim(),
+                            selector: selectorInput.value
+                        });
+                    }
+                });
+                
+                sessionStorage.setItem('visualSelectorFieldSelectors', JSON.stringify(fields));
+                
+                // Also save pagination and container selectors
+                const paginationSelector = document.getElementById('pagination-selector').value;
+                if (paginationSelector) {
+                    sessionStorage.setItem('visualSelectorPaginationSelector', paginationSelector);
+                }
+                
+                const itemContainerSelector = document.getElementById('item-container-selector').value;
+                if (itemContainerSelector) {
+                    sessionStorage.setItem('visualSelectorItemContainerSelector', itemContainerSelector);
+                }
+            }
 
             function generateCSSSelector(el) {
                 // More robust check for element-like nodes across iframe boundaries
@@ -240,6 +314,8 @@
                 const removeButton = fieldDiv.querySelector('.btn-remove-selector');
                 removeButton.addEventListener('click', function() {
                     fieldDiv.remove();
+                    // Update storage when a selector is removed
+                    saveFieldSelectorsToStorage();
                 });
             }
 
@@ -255,6 +331,15 @@
                         setTimeout(() => { this.textContent = originalText; }, 1500);
                     }
                 });
+            });
+
+            // Event listeners for input changes to save container and pagination selectors
+            document.getElementById('pagination-selector').addEventListener('input', function() {
+                sessionStorage.setItem('visualSelectorPaginationSelector', this.value);
+            });
+            
+            document.getElementById('item-container-selector').addEventListener('input', function() {
+                sessionStorage.setItem('visualSelectorItemContainerSelector', this.value);
             });
 
             const useSelectorsBtn = document.getElementById('use-these-selectors-btn');
@@ -285,6 +370,10 @@
 
                 console.log("Collected selectors for transfer:", collectedSelectors);
                 sessionStorage.setItem('visualScraperData', JSON.stringify(collectedSelectors));
+                
+                // Don't clear the visualSelectorUrl so it persists on this page
+                // when users navigate back
+                
                 window.location.href = "{{ url_for('index') }}"; // Redirect to main page
             });
 

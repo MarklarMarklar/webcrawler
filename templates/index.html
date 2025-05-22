@@ -233,6 +233,8 @@
                 newItem.querySelector('.remove-selector').addEventListener('click', function() {
                     newItem.remove();
                     testResultDiv.remove();
+                    // Save main page state after removing a selector
+                    saveMainPageState();
                 });
 
                 newItem.querySelector('.test-selector').addEventListener('click', function() {
@@ -248,46 +250,197 @@
                 const dataString = sessionStorage.getItem('visualScraperData');
                 const selectorsContainer = document.getElementById('selectors-container');
                 
-                // Always clear any existing selector rows first to ensure consistent listener attachment
-                document.querySelectorAll('#selectors-container .selector-item, #selectors-container .test-result').forEach(el => el.remove());
-
-                if (dataString) {
-            try {
-                        const data = JSON.parse(dataString);
-                        console.log("Found visualScraperData in sessionStorage:", data);
+                // Check if we already have saved state for the main page
+                const savedMainPageState = sessionStorage.getItem('mainPageState');
                 
-                        if (data.target_url) {
-                            document.getElementById('start-url').value = data.target_url;
+                // Load the main page state first if it exists
+                if (savedMainPageState) {
+                    try {
+                        const mainPageData = JSON.parse(savedMainPageState);
+                        console.log("Restoring from saved mainPageState:", mainPageData);
+                        
+                        // Clear existing selectors before loading
+                        document.querySelectorAll('#selectors-container .selector-item, #selectors-container .test-result').forEach(el => el.remove());
+                        
+                        // Populate form fields from main page state
+                        if (mainPageData.start_url) {
+                            document.getElementById('start-url').value = mainPageData.start_url;
                         }
-                        if (data.pagination_selector) {
-                            document.getElementById('pagination-selector').value = data.pagination_selector;
+                        if (mainPageData.pagination_selector) {
+                            document.getElementById('pagination-selector').value = mainPageData.pagination_selector;
                         }
-                        if (data.item_container) {
-                            document.getElementById('item-container').value = data.item_container;
+                        if (mainPageData.item_container) {
+                            document.getElementById('item-container').value = mainPageData.item_container;
+                        }
+                        if (mainPageData.render_js_in_spider !== undefined) {
+                            document.getElementById('render-js-in-spider').checked = mainPageData.render_js_in_spider;
+                        }
+                        if (mainPageData.user_query) {
+                            document.getElementById('llm-query').value = mainPageData.user_query;
+                        }
+                        if (mainPageData.page_limit) {
+                            document.getElementById('page-limit').value = mainPageData.page_limit;
+                        }
+                        if (mainPageData.export_format) {
+                            document.getElementById('export-format').value = mainPageData.export_format;
+                        }
+                        if (mainPageData.save_path) {
+                            document.getElementById('save-path').value = mainPageData.save_path;
                         }
                         
-                        if (data.fields && data.fields.length > 0) {
-                            data.fields.forEach(field => {
+                        // Create a map of existing fields for merging
+                        const existingFields = new Map();
+                        if (mainPageData.fields && mainPageData.fields.length > 0) {
+                            mainPageData.fields.forEach(field => {
+                                existingFields.set(field.name, field);
                                 addSelectorRow(field.name, field.selector);
                             });
-                    } else {
-                            // If no fields came from visual tool, but data object existed, add one default empty row
-                            addSelectorRow();
                         }
                         
-                        sessionStorage.removeItem('visualScraperData'); // Clean up
-                        console.log("Processed and removed visualScraperData from sessionStorage.");
+                        // Now check if we have new data from the visual selector
+                        if (dataString) {
+                            try {
+                                const visualData = JSON.parse(dataString);
+                                console.log("Found visualScraperData in sessionStorage:", visualData);
+                                
+                                // Update URL, pagination, container if provided and not already set
+                                if (visualData.target_url && !document.getElementById('start-url').value) {
+                                    document.getElementById('start-url').value = visualData.target_url;
+                                }
+                                if (visualData.pagination_selector && !document.getElementById('pagination-selector').value) {
+                                    document.getElementById('pagination-selector').value = visualData.pagination_selector;
+                                }
+                                if (visualData.item_container && !document.getElementById('item-container').value) {
+                                    document.getElementById('item-container').value = visualData.item_container;
+                                }
+                                
+                                // Add new fields from visual selector that don't already exist
+                                if (visualData.fields && visualData.fields.length > 0) {
+                                    visualData.fields.forEach(field => {
+                                        if (!existingFields.has(field.name)) {
+                                            addSelectorRow(field.name, field.selector);
+                                            existingFields.set(field.name, field);
+                                        }
+                                    });
+                                }
+                                
+                                // Save the merged state
+                                saveMainPageState();
+                                console.log("Merged visualScraperData with existing state and saved as main page state.");
+                            } catch (e) {
+                                console.error("Error parsing visualScraperData from sessionStorage:", e);
+                            }
+                        }
                     } catch (e) {
-                        console.error("Error parsing visualScraperData from sessionStorage:", e);
-                        sessionStorage.removeItem('visualScraperData'); // Clean up corrupted data
-                        addSelectorRow(); // Add a default row in case of error too
+                        console.error("Error parsing mainPageState from sessionStorage:", e);
+                        // If there was an error, but we have visual data, try to load that
+                        if (dataString) {
+                            processVisualScraperData(dataString);
+                        } else {
+                            addSelectorRow(); // Add a default row
+                        }
                     }
-                } else {
-                    // If no data from visual tool, add one default empty selector row
+                } 
+                // If no main page state exists but we have visual data
+                else if (dataString) {
+                    processVisualScraperData(dataString);
+                } 
+                // No data at all
+                else {
+                    // Add one default empty selector row
                     addSelectorRow();
                 }
             }
+            
+            // Helper function to process visual scraper data
+            function processVisualScraperData(dataString) {
+                try {
+                    // Clear existing selectors before loading
+                    document.querySelectorAll('#selectors-container .selector-item, #selectors-container .test-result').forEach(el => el.remove());
+                    
+                    const data = JSON.parse(dataString);
+                    console.log("Processing visualScraperData:", data);
+                    
+                    if (data.target_url) {
+                        document.getElementById('start-url').value = data.target_url;
+                    }
+                    if (data.pagination_selector) {
+                        document.getElementById('pagination-selector').value = data.pagination_selector;
+                    }
+                    if (data.item_container) {
+                        document.getElementById('item-container').value = data.item_container;
+                    }
+                    
+                    if (data.fields && data.fields.length > 0) {
+                        data.fields.forEach(field => {
+                            addSelectorRow(field.name, field.selector);
+                        });
+                    } else {
+                        // If no fields came from visual tool, add one default empty row
+                        addSelectorRow();
+                    }
+                    
+                    // Save this data as main page state
+                    saveMainPageState();
+                    console.log("Processed visualScraperData and saved as main page state.");
+                } catch (e) {
+                    console.error("Error processing visualScraperData:", e);
+                    addSelectorRow(); // Add a default row in case of error
+                }
+            }
+            
             loadSelectorsFromVisualTool(); // Call on page load
+            
+            // Function to save main page state to sessionStorage
+            function saveMainPageState() {
+                const mainPageData = {
+                    start_url: document.getElementById('start-url').value,
+                    pagination_selector: document.getElementById('pagination-selector').value,
+                    item_container: document.getElementById('item-container').value,
+                    render_js_in_spider: document.getElementById('render-js-in-spider').checked,
+                    user_query: document.getElementById('llm-query').value,
+                    page_limit: document.getElementById('page-limit').value,
+                    export_format: document.getElementById('export-format').value,
+                    save_path: document.getElementById('save-path').value,
+                    fields: []
+                };
+                
+                // Collect field selectors
+                document.querySelectorAll('#selectors-container .selector-item').forEach(item => {
+                    const fieldNameInput = item.querySelector('.field-name');
+                    const selectorInput = item.querySelector('.field-selector');
+                    if (fieldNameInput && selectorInput && fieldNameInput.value && selectorInput.value) {
+                        mainPageData.fields.push({
+                            name: fieldNameInput.value,
+                            selector: selectorInput.value
+                        });
+                    }
+                });
+                
+                sessionStorage.setItem('mainPageState', JSON.stringify(mainPageData));
+                console.log("Saved main page state to sessionStorage");
+            }
+            
+            // Add event listeners to form elements to save state on input
+            document.getElementById('start-url').addEventListener('input', saveMainPageState);
+            document.getElementById('pagination-selector').addEventListener('input', saveMainPageState);
+            document.getElementById('item-container').addEventListener('input', saveMainPageState);
+            document.getElementById('render-js-in-spider').addEventListener('change', saveMainPageState);
+            document.getElementById('llm-query').addEventListener('input', saveMainPageState);
+            document.getElementById('page-limit').addEventListener('input', saveMainPageState);
+            document.getElementById('export-format').addEventListener('change', saveMainPageState);
+            document.getElementById('save-path').addEventListener('input', saveMainPageState);
+            
+            // Override addSelectorRow to also save state after adding a row
+            const originalAddSelectorRow = addSelectorRow;
+            addSelectorRow = function(name = '', selectorValue = '') {
+                originalAddSelectorRow(name, selectorValue);
+                // Add event listeners to the new inputs to save state on input
+                const newInputs = document.querySelectorAll('#selectors-container .selector-item:last-child input');
+                newInputs.forEach(input => {
+                    input.addEventListener('input', saveMainPageState);
+                });
+            };
 
             // Configure API connection
             document.getElementById('update-api').addEventListener('click', async function() {
@@ -308,7 +461,7 @@
                     });
                     const data = await response.json();
                     updateApiStatusDisplay(data);
-                } catch (error) {
+            } catch (error) {
                     console.error('Update API error:', error);
                     updateApiStatusDisplay({ success: false, error: 'Failed to send request.', mock_mode: useMock });
                 } finally {
@@ -364,64 +517,96 @@
             const generateSelectorsButton = document.getElementById('generate-selectors');
             if (generateSelectorsButton) {
                 generateSelectorsButton.addEventListener('click', async function() {
-            const url = document.getElementById('start-url').value;
-            const query = document.getElementById('llm-query').value;
+                    const url = document.getElementById('start-url').value;
+                    const query = document.getElementById('llm-query').value;
                     const llmStatusEl = document.getElementById('llm-status');
                     const button = this;
             
-            if (!url || !query) {
+                    if (!url || !query) {
                         llmStatusEl.innerHTML = 'Please enter both URL and query.';
                         llmStatusEl.className = 'status-error';
-                return;
-            }
+                        return;
+                    }
                     button.disabled = true;
                     button.textContent = 'Generating...';
                     llmStatusEl.innerHTML = 'Asking AI to generate selectors...';
                     llmStatusEl.className = 'status-info';
             
-            try {
-                const response = await fetch('/generate-selectors', {
-                    method: 'POST',
+                    try {
+                        const response = await fetch('/generate-selectors', {
+                            method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url, query })
-                });
-                const data = await response.json();
-                if (data.success) {
+                            body: JSON.stringify({ url, query })
+                        });
+                        const data = await response.json();
+                        if (data.success) {
                             llmStatusEl.innerHTML = '✓ Selectors generated successfully!';
                             llmStatusEl.className = 'status-ok';
                             if (data.warning) llmStatusEl.innerHTML += ` <span class="status-warning">(${data.warning})</span>`;
                             
-                            document.getElementById('selectors-container').innerHTML = ''; // Clear existing
+                            // Store existing fields in a map to keep those not overwritten by the new selectors
+                            const existingFieldSelectors = new Map();
+                            document.querySelectorAll('#selectors-container .selector-item').forEach(item => {
+                                const fieldNameInput = item.querySelector('.field-name');
+                                const selectorInput = item.querySelector('.field-selector');
+                                if (fieldNameInput && selectorInput && fieldNameInput.value) {
+                                    existingFieldSelectors.set(fieldNameInput.value, {
+                                        name: fieldNameInput.value,
+                                        selector: selectorInput.value
+                                    });
+                                }
+                            });
+                            
+                            // Clear the selectors container to rebuild it
+                            document.querySelector('#selectors-container').innerHTML = '';
+                            
+                            // Update container and pagination from response if provided
                             const selectors = data.selectors;
-                    if (selectors.item_container) {
-                        document.getElementById('item-container').value = selectors.item_container;
-                        delete selectors.item_container;
-                    }
-                    if (selectors.pagination_selector) {
-                        document.getElementById('pagination-selector').value = selectors.pagination_selector;
-                        delete selectors.pagination_selector;
-                    }
+                            if (selectors.item_container) {
+                                document.getElementById('item-container').value = selectors.item_container;
+                                delete selectors.item_container;
+                            }
+                            if (selectors.pagination_selector) {
+                                document.getElementById('pagination-selector').value = selectors.pagination_selector;
+                                delete selectors.pagination_selector;
+                            }
+                            
+                            // First add the newly generated selectors
                             for (const [fieldName, selectorValue] of Object.entries(selectors)) {
                                 addSelectorRow(fieldName, selectorValue);
-                    }
+                                // Remove from existingFieldSelectors if we've just added it
+                                existingFieldSelectors.delete(fieldName);
+                            }
+                            
+                            // Now add back any existing selectors that weren't overwritten
+                            for (const [fieldName, fieldData] of existingFieldSelectors.entries()) {
+                                addSelectorRow(fieldData.name, fieldData.selector);
+                            }
+                            
+                            // Save the updated state
+                            saveMainPageState();
+                            
                             // Auto-test container and pagination after generation
-                            if (document.getElementById('item-container').value) testContainerOrField(document.getElementById('item-container').value, document.getElementById('container-test-result'), true);
-                            if (document.getElementById('pagination-selector').value) testContainerOrField(document.getElementById('pagination-selector').value, document.getElementById('pagination-test-result'), false);
+                            if (document.getElementById('item-container').value) {
+                                testContainerOrField(document.getElementById('item-container').value, document.getElementById('container-test-result'), true, null, true);
+                            }
+                            if (document.getElementById('pagination-selector').value) {
+                                testContainerOrField(document.getElementById('pagination-selector').value, document.getElementById('pagination-test-result'), false, null, true);
+                            }
 
-
-                } else {
+                        } else {
                             llmStatusEl.innerHTML = `✗ Error generating selectors: ${data.error}`;
                             llmStatusEl.className = 'status-error';
-                }
-            } catch (error) {
+                        }
+                    } catch (error) {
                         console.error('Generate selectors error:', error);
                         llmStatusEl.innerHTML = `✗ Error: ${error.message}`;
                         llmStatusEl.className = 'status-error';
-            } finally {
+                    } finally {
                         button.disabled = false;
                         button.textContent = 'Generate Selectors';
-            }
-        });
+                    }
+                });
             }
             
             // Function to test a selector (for container or individual field)
@@ -599,6 +784,10 @@
                             actionsDiv.remove();
                             button.disabled = false;
                             button.textContent = 'Refine with AI';
+                            
+                            // Save state after accepting a refined selector
+                            saveMainPageState();
+                            
                             // Optionally, re-test the accepted selector immediately by calling testContainerOrField again
                             // testContainerOrField(finalSelector, resultElement, false, fieldName, true);
                         };
@@ -686,12 +875,12 @@
             // So, the '#add-selector' button is the primary way to add rows manually after page load.
 
             // Handle form submission for scraping
-        document.getElementById('scraper-form').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const url = document.getElementById('start-url').value;
+            document.getElementById('scraper-form').addEventListener('submit', async function(e) {
+                e.preventDefault();
+                const url = document.getElementById('start-url').value;
                 const formSelectors = {};
-            let hasErrors = false;
-            
+                let hasErrors = false;
+                
                 document.querySelectorAll('#selectors-container .selector-item').forEach(item => {
                     const fieldNameInput = item.querySelector('.field-name');
                     const selectorInput = item.querySelector('.field-selector');
@@ -716,15 +905,18 @@
                     return;
                 }
                 
-            const itemContainer = document.getElementById('item-container').value;
+                const itemContainer = document.getElementById('item-container').value;
                 if (itemContainer) formSelectors['item_container'] = itemContainer;
-            const paginationSelector = document.getElementById('pagination-selector').value;
+                const paginationSelector = document.getElementById('pagination-selector').value;
                 if (paginationSelector) formSelectors['pagination_selector'] = paginationSelector;
+                
+                // Save the form state before submitting
+                saveMainPageState();
                 
                 resultsDiv.innerHTML = '<div class="alert alert-info">Scraping in progress...</div>';
                 const scrapeButton = this.querySelector('button[type="submit"]');
-                    scrapeButton.disabled = true;
-                    scrapeButton.textContent = 'Scraping...';
+                scrapeButton.disabled = true;
+                scrapeButton.textContent = 'Scraping...';
                 
                 try {
                 const response = await fetch('/scrape', {
@@ -789,10 +981,12 @@
             }
 
             // Page limit buttons
-        document.querySelectorAll('.page-limit-button').forEach(button => {
-            button.addEventListener('click', function() {
-                document.getElementById('page-limit').value = this.getAttribute('data-value');
-            });
+            document.querySelectorAll('.page-limit-button').forEach(button => {
+                button.addEventListener('click', function() {
+                    document.getElementById('page-limit').value = this.getAttribute('data-value');
+                    // Save state after changing page limit
+                    saveMainPageState();
+                });
             });
             
             // Dismiss mock banner

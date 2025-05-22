@@ -176,6 +176,53 @@ pre {
     color: var(--success-color);
 }
 
+.status-warning {
+    color: var(--warning-color);
+}
+
+.status-info {
+    color: var(--primary-color);
+}
+
+.status-pending {
+    color: #6b7280; /* Gray color for pending status */
+    font-style: italic;
+}
+
+/* Status backgrounds for test results */
+.status-success {
+    background-color: #dcfce7;
+    color: var(--success-color);
+    border: 1px solid #86efac;
+    padding: 0.75rem;
+    border-radius: 4px;
+}
+
+.status-error {
+    background-color: #fee2e2;
+    color: var(--error-color);
+    border: 1px solid #fca5a5;
+    padding: 0.75rem;
+    border-radius: 4px;
+}
+
+.status-pending {
+    background-color: #f3f4f6;
+    color: #6b7280;
+    border: 1px solid #d1d5db;
+    padding: 0.75rem;
+    border-radius: 4px;
+    font-style: italic;
+}
+
+.status-info {
+    background-color: #e0f2fe;
+    color: var(--primary-color);
+    border: 1px solid #bae6fd;
+    padding: 0.75rem;
+    border-radius: 4px;
+}
+
 .status-tip {
     color: var(--tip-color);
     font-style: italic;
