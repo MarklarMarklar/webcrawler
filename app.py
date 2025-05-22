@@ -2,6 +2,10 @@ import sys
 import os
 import time
 
+# Ensure asyncio reactor is set before any Twisted imports if using scrapy-playwright
+# This is a common requirement for scrapy-playwright
+os.environ["TWISTED_REACTOR"] = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
+
 # Insert the current directory at the beginning of the path
 # to make sure our custom modules are found first
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -16,6 +20,7 @@ from scrapy.crawler import CrawlerProcess
 from scrapy import Selector
 from scrapy import signals
 import requests
+from playwright.sync_api import sync_playwright
 from multiprocessing import Process, Queue
 import json
 import tempfile
@@ -23,6 +28,7 @@ import logging
 from llm_api import LMStudioAPI, POTENTIAL_API_URLS, WSL_CONNECTION_TIMEOUT, DEFAULT_API_URL
 from dotenv import load_dotenv
 import find_host_ip
+from scrapy_playwright.page import PageMethod
 
 # Load environment variables from .env file if present
 load_dotenv()
@@ -72,24 +78,34 @@ COMMON_REQUEST_HEADERS = {
 class DynamicSpider(scrapy.Spider):
     name = 'dynamic_spider'
     
-    def __init__(self, start_url=None, selectors=None, *args, **kwargs):
+    def __init__(self, start_url=None, selectors=None, render_js_in_spider=False, *args, **kwargs):
         super(DynamicSpider, self).__init__(*args, **kwargs)
-        self.start_urls = [start_url]
-        # Store selectors dictionary
+        self.start_urls = [start_url] # Will be overridden by start_requests
+        self.initial_start_url = start_url
         self.selectors = selectors or {}
-        # Keep track of the original selectors before we pop any values
         self.original_selectors = dict(selectors or {})
-        # Set max pages to follow (default to 5 to avoid excessive requests)
         self.max_pages = kwargs.get('max_pages', 5)
         self.pages_followed = 0
         self.current_page = 1
+        self.render_js_in_spider = render_js_in_spider
         
-        # Log selectors for debugging
         self.logger.info(f"Spider initialized with selectors: {self.selectors}")
         self.logger.info(f"Max pages to follow: {self.max_pages}")
+        self.logger.info(f"Render JS in spider: {self.render_js_in_spider}")
+
+    def start_requests(self):
+        meta = {}
+        if self.render_js_in_spider:
+            meta['playwright'] = True
+            meta['playwright_page_methods'] = [
+                PageMethod("wait_for_load_state", "domcontentloaded", timeout=90000),
+                PageMethod("wait_for_timeout", 5000)
+            ]
+        yield scrapy.Request(self.initial_start_url, callback=self.parse, meta=meta)
     
     def parse(self, response):
         self.logger.info(f"Parsing page: {response.url} (Page {self.current_page} of max {self.max_pages})")
+        self.logger.info(f"Response received via Playwright: {response.meta.get('playwright', False)}")
         
         # Extract pagination and item container selectors
         item_container = self.original_selectors.get('item_container')
@@ -134,8 +150,13 @@ class DynamicSpider(scrapy.Spider):
                             self.logger.info(f"Using XPath selector for {field_name}: {xpath_expr}")
                             result = container.xpath(xpath_expr).get()
                         elif "::text" in selector:
-                            self.logger.info(f"Using CSS text selector for {field_name}: {selector}")
-                            result = container.css(selector).get()
+                            base_selector = selector.split("::text")[0]
+                            self.logger.info(f"Extracting all text for {field_name} from base selector '{base_selector}' in container")
+                            selected_elements = container.css(base_selector)
+                            if selected_elements:
+                                result = " ".join(selected_elements[0].xpath(".//text()").getall()).strip()
+                            else:
+                                result = None
                         elif "::attr" in selector:
                             self.logger.info(f"Using CSS attribute selector for {field_name}: {selector}")
                             result = container.css(selector).get()
@@ -170,8 +191,13 @@ class DynamicSpider(scrapy.Spider):
                         self.logger.info(f"Using XPath selector for {field_name}: {xpath_expr}")
                         result = response.xpath(xpath_expr).get()
                     elif "::text" in selector:
-                        self.logger.info(f"Using CSS text selector for {field_name}: {selector}")
-                        result = response.css(selector).get()
+                        base_selector = selector.split("::text")[0]
+                        self.logger.info(f"Extracting all text for {field_name} from base selector '{base_selector}' in response")
+                        selected_elements = response.css(base_selector)
+                        if selected_elements:
+                            result = " ".join(selected_elements[0].xpath(".//text()").getall()).strip()
+                        else:
+                            result = None
                     elif "::attr" in selector:
                         self.logger.info(f"Using CSS attribute selector for {field_name}: {selector}")
                         result = response.css(selector).get()
@@ -198,31 +224,34 @@ class DynamicSpider(scrapy.Spider):
             self.current_page += 1
             self.logger.info(f"Following pagination to page {self.current_page}/{self.max_pages}")
             
-            # Get the next page URL
             next_page = None
             try:
                 if pagination_selector.startswith('xpath:'):
                     xpath_expr = pagination_selector[6:]
                     self.logger.info(f"Using XPath for pagination: {xpath_expr}")
-                    if 'attr(' in xpath_expr:
-                        next_page = response.xpath(xpath_expr).get()
-                    else:
-                        next_page = response.xpath(xpath_expr).get()
+                    next_page = response.xpath(xpath_expr).get()
                 else:
                     self.logger.info(f"Using CSS for pagination: {pagination_selector}")
                     if '::attr' in pagination_selector:
                         next_page = response.css(pagination_selector).get()
                     else:
+                        # Default to href if no specific attribute is mentioned in CSS pagination selector
                         next_page = response.css(pagination_selector + '::attr(href)').get()
                 
                 if next_page:
                     self.logger.info(f"Found next page URL: {next_page}")
                     next_page_url = response.urljoin(next_page)
                     self.logger.info(f"Following pagination to: {next_page_url} (Page {self.current_page})")
+                    
+                    request_meta = response.meta.copy() # Preserve existing meta like playwright settings
+                    if self.render_js_in_spider and 'playwright' not in request_meta:
+                         request_meta['playwright'] = True
+
                     yield scrapy.Request(
                         url=next_page_url, 
                         callback=self.parse,
-                        dont_filter=True  # Important for allowing revisits
+                        meta=request_meta, # Pass along meta
+                        dont_filter=True
                     )
                 else:
                     self.logger.info(f"No next page found at page {self.current_page-1}, pagination complete")
@@ -233,13 +262,29 @@ class DynamicSpider(scrapy.Spider):
         elif not pagination_selector:
             self.logger.info("No pagination selector provided, not following pagination")
 
-def test_selector(url, selector, is_container=False):
+def test_selector(url, selector, is_container=False, render_js=False):
     try:
-        logger.info(f"Testing selector: {selector} on URL: {url}")
-        response = requests.get(url, timeout=10, headers=COMMON_REQUEST_HEADERS)
-        response.raise_for_status()
+        logger.info(f"Testing selector: {selector} on URL: {url}, Render JS: {render_js}")
+        html_content = ""
+
+        if render_js:
+            logger.info(f"Fetching URL {url} with Playwright for JS rendering")
+            with sync_playwright() as p:
+                browser = p.chromium.launch()
+                page = browser.new_page()
+                page.goto(url, timeout=90000, wait_until='load')
+                page.wait_for_timeout(3000) # Allow time for JS to settle
+                html_content = page.content()
+                browser.close()
+            logger.info(f"Successfully fetched and rendered HTML content with Playwright, length: {len(html_content)}")
+        else:
+            logger.info(f"Fetching URL {url} with requests (no JS rendering)")
+            response = requests.get(url, timeout=30, headers=COMMON_REQUEST_HEADERS) # Increased timeout slightly
+            response.raise_for_status()
+            html_content = response.text
+            logger.info(f"Successfully fetched HTML content with requests, length: {len(html_content)}")
         
-        sel = Selector(text=response.text)
+        sel = Selector(text=html_content)
         elements = []
 
         if selector.startswith('xpath:'):
@@ -271,7 +316,22 @@ def test_selector(url, selector, is_container=False):
             parent_element = elements[0].xpath("..")
             html_snippet_for_llm = parent_element[0].get() if parent_element else html_snippet_display_content
             
-            text_content_preview = "".join(elements[0].xpath(".//text()").getall()).strip()
+            text_content_preview = ""
+            # If the selector targets text (e.g., ::text or ::attr(href)), the result is already the text.
+            if "::attr" in selector: # Handle attribute selectors specifically
+                text_content_preview = elements[0].get()
+            elif "::text" in selector: # For selectors like "base_selector::text"
+                # We want the preview to show the combined text from the element matched by base_selector
+                base_selector_for_text_preview = selector.split("::text")[0]
+                parent_elements_for_preview = sel.css(base_selector_for_text_preview)
+                if parent_elements_for_preview:
+                    text_content_preview = "".join(parent_elements_for_preview[0].xpath(".//text()").getall()).strip()
+                else:
+                    # Fallback: if base_selector_for_text_preview somehow doesn't match,
+                    # show the first raw text node found by the original selector.
+                    text_content_preview = elements[0].get() if elements else None
+            else: # Otherwise, extract all text from within the element matched by the selector
+                text_content_preview = "".join(elements[0].xpath(".//text()").getall()).strip()
             
             html_snippet_display_preview = html_snippet_display_content[:500] + ('...' if len(html_snippet_display_content) > 500 else '')
             text_content_preview_display = text_content_preview[:200] + ('...' if len(text_content_preview) > 200 else '')
@@ -302,6 +362,7 @@ def test_selector_route():
         url = data.get('url')
         selector_str = data.get('selector')
         is_container = data.get('is_container', False)
+        render_js = data.get('render_js', False) # Get the new parameter
         
         if not url or not selector_str:
             return jsonify({
@@ -309,7 +370,7 @@ def test_selector_route():
                 'message': 'URL and selector are required'
             }), 400
         
-        result_dict = test_selector(url, selector_str, is_container)
+        result_dict = test_selector(url, selector_str, is_container, render_js) # Pass it to the function
         
         return jsonify(result_dict)
     except Exception as e:
@@ -564,28 +625,23 @@ def generate_selectors():
             'error': str(e)
         }), 500
 
-def run_spider(start_url, selectors, output_file, export_format='json', page_limit=10):
+def run_spider(start_url, selectors, output_file, export_format='json', page_limit=10, render_js_in_spider=False):
     try:
-        # Fix path format for Windows and use absolute path
         output_file = os.path.abspath(output_file).replace('\\', '/')
         logger.info(f"Absolute output file path: {output_file}")
         
-        # Check if pagination is being used
         is_paginated = 'pagination_selector' in selectors
-        # Set a higher request timeout for paginated crawls
-        request_timeout = 300 if is_paginated else 60
+        request_timeout = 300 if is_paginated or render_js_in_spider else 60 # Longer for JS rendering too
         
-        # Get crawler settings
         logger.info("Setting up Scrapy crawler settings")
         settings = {
             'LOG_LEVEL': 'DEBUG',
             'LOG_ENABLED': True,
             'DOWNLOAD_TIMEOUT': request_timeout,
-            'CONCURRENT_REQUESTS': 1,  # Reduce to avoid overwhelming the target site
-            'DOWNLOAD_DELAY': 1,  # Add a 1 second delay between requests
-            # Use the common headers for Scrapy requests as well
-            'DEFAULT_REQUEST_HEADERS': COMMON_REQUEST_HEADERS, 
-            'USER_AGENT': COMMON_REQUEST_HEADERS['User-Agent'], # Explicitly set UA too, though covered by DEFAULT_REQUEST_HEADERS
+            'CONCURRENT_REQUESTS': 1,
+            'DOWNLOAD_DELAY': 1,
+            'DEFAULT_REQUEST_HEADERS': COMMON_REQUEST_HEADERS,
+            'USER_AGENT': COMMON_REQUEST_HEADERS['User-Agent'],
             'FEEDS': {
                 output_file: {
                     'format': export_format,
@@ -596,7 +652,21 @@ def run_spider(start_url, selectors, output_file, export_format='json', page_lim
             },
             'FEED_EXPORT_ENCODING': 'utf-8'
         }
-        
+
+        if render_js_in_spider:
+            logger.info("Enabling Playwright for Scrapy spider")
+            # Ensure the reactor is set. This is often done globally at the start of the script.
+            # os.environ["TWISTED_REACTOR"] = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
+            settings['TWISTED_REACTOR'] = 'twisted.internet.asyncioreactor.AsyncioSelectorReactor'
+            settings['DOWNLOAD_HANDLERS'] = {
+                "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+                "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+            }
+            settings['PLAYWRIGHT_BROWSER_TYPE'] = 'chromium'
+            # Optional: Add launch options like headless=False for debugging
+            # settings['PLAYWRIGHT_LAUNCH_OPTIONS'] = {"headless": False, "slow_mo": 500} 
+            settings['PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT'] = 90000 # 90 seconds, same as proxy
+
         # Ensure page_limit is a valid integer
         try:
             page_limit = int(page_limit)
@@ -657,7 +727,8 @@ def run_spider(start_url, selectors, output_file, export_format='json', page_lim
                 crawler,
                 start_url=start_url, 
                 selectors=selectors,
-                max_pages=page_limit
+                max_pages=page_limit,
+                render_js_in_spider=render_js_in_spider # Pass the flag
             )
             
             # Run the process
@@ -745,9 +816,10 @@ def scrape():
         export_format = data.get('export_format', 'json')
         save_path = data.get('save_path', '')
         page_limit = data.get('page_limit', 10)
+        render_js_in_spider = data.get('render_js_in_spider', False) # Get new flag
         
-        # Validate page limit (ensure it's between 1 and 100)
         try:
+            # Validate page limit (ensure it's between 1 and 100)
             page_limit = int(page_limit)
             if page_limit < 1:
                 page_limit = 1
@@ -811,11 +883,12 @@ def scrape():
             logger.info(f"Container selector: {selectors['item_container']}")
         if 'pagination_selector' in selectors:
             logger.info(f"Pagination selector: {selectors['pagination_selector']}")
+        logger.info(f"Render JS in Scrapy spider: {render_js_in_spider}")
         
         try:
             # Run the spider in a separate process
             logger.info("Starting spider process")
-            p = Process(target=run_spider, args=(start_url, selectors, output_file_abs, export_format, page_limit))
+            p = Process(target=run_spider, args=(start_url, selectors, output_file_abs, export_format, page_limit, render_js_in_spider))
             p.start()
             p.join()
             
@@ -953,37 +1026,37 @@ def visual_selector():
 
 @app.route('/proxy-page')
 def proxy_page():
-    target_url = request.args.get('url')
-    if not target_url:
-        return jsonify({'error': 'Missing URL parameter'}), 400
+    url = request.args.get('url')
+    if not url:
+        return "Error: URL parameter is required.", 400
 
-    logger.info(f"Proxying request for URL: {target_url}")
     try:
-        # It's good practice to set a timeout
-        # Using the common headers defined above
-        response = requests.get(target_url, headers=COMMON_REQUEST_HEADERS, timeout=10)
-        response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
-        
-        # Important: To allow relative links/scripts/CSS within the proxied page to work correctly,
-        # we should inject a <base> tag into the <head> of the fetched HTML.
-        content = response.text
-        # A simple way to inject <base href="...">. More robust parsing might be needed for complex cases.
-        base_href_tag = f'<base href="{response.url}">' # Use the final URL after redirects
-        if '<head>' in content:
-            content = content.replace('<head>', '<head>\n' + base_href_tag, 1)
-        elif '<HEAD>' in content: # case insensitive for <head>
-            content = content.replace('<HEAD>', '<HEAD>\n' + base_href_tag, 1)
-        else:
-            # If no <head> tag, prepend (less ideal, but a fallback)
-            content = base_href_tag + content
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page()
             
-        return content, 200, {'Content-Type': response.headers.get('content-type', 'text/html')}
-    except requests.exceptions.Timeout:
-        logger.error(f"Timeout when trying to fetch {target_url} for proxy.")
-        return jsonify({'error': 'Timeout fetching the URL'}), 504 # Gateway Timeout
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error fetching URL {target_url} for proxy: {e}")
-        return jsonify({'error': f'Error fetching URL: {str(e)}'}), 502 # Bad Gateway
+            # Increased timeout and changed wait_until condition
+            page.goto(url, timeout=90000, wait_until='load') # Increased to 90s, changed to 'load'
+            
+            # Add a small delay to allow for client-side rendering to settle
+            page.wait_for_timeout(3000) # Wait for 3 seconds
+
+            content = page.content()
+            browser.close()
+
+        # Inject a base tag to help with relative URLs
+        base_tag = f'<base href="{url}">'
+        if '<head>' in content:
+            content = content.replace('<head>', f'<head>{base_tag}', 1)
+        else:
+            # Fallback if no <head> tag (though unlikely for full HTML pages)
+            content = base_tag + content
+            
+        return content, 200
+    except Exception as e:
+        logger.error(f"Error proxying page {url} with Playwright: {str(e)}")
+        # Return a more informative error to the client
+        return f"Error rendering page with Playwright: {str(e)}", 500
 
 @app.route('/api-status', methods=['GET'])
 def api_status():
@@ -1010,28 +1083,45 @@ def refine_selector_llm_route():
         field_name = data.get('field_name')
         original_selector = data.get('original_selector')
         html_snippet = data.get('html_snippet')
-        user_query_context = data.get('user_query_context') # This might come from the main llm-query input
+        user_query_context = data.get('user_query_context')
+        page_url = data.get('page_url') # Get the page_url
 
-        if not all([field_name, original_selector, html_snippet]):
+        if not all([field_name, original_selector, html_snippet, page_url]): # Ensure page_url is present
             return jsonify({
                 'success': False,
-                'error': 'Missing required fields: field_name, original_selector, or html_snippet.'
+                'error': 'Missing required fields: field_name, original_selector, html_snippet, or page_url.'
             }), 400
 
-        # Call the new method in llm_api
-        # Ensure llm_api is the globally initialized one
-        result = llm_api.refine_single_selector(field_name, original_selector, html_snippet, user_query_context)
+        llm_result = llm_api.refine_single_selector(field_name, original_selector, html_snippet, user_query_context)
 
-        if result.get('success'):
+        if llm_result.get('success'):
+            llm_suggestion_data = llm_result.get('data')
+            refined_selector_from_llm = llm_suggestion_data.get('refined_selector')
+            extraction_method = llm_suggestion_data.get('extraction_method')
+            extraction_detail = llm_suggestion_data.get('extraction_detail')
+
+            # Construct the full selector based on extraction method for testing
+            final_test_selector = refined_selector_from_llm
+            if extraction_method == 'text' and not final_test_selector.endswith('::text'):
+                final_test_selector += '::text'
+            elif extraction_method == 'attribute' and extraction_detail and '::attr' not in final_test_selector:
+                final_test_selector += f'::attr({extraction_detail})'
+
+            # Auto-test the LLM's refined selector on the live page_url
+            logger.info(f"Auto-testing refined selector '{final_test_selector}' from LLM on URL: {page_url}")
+            auto_test_result = test_selector(page_url, final_test_selector, is_container=False, render_js=True)
+            logger.info(f"Auto-test result: {auto_test_result}")
+
             return jsonify({
                 'success': True,
-                'data': result.get('data')
+                'data': llm_suggestion_data,
+                'auto_test_result': auto_test_result # Include the test result
             })
         else:
             return jsonify({
                 'success': False,
-                'error': result.get('error', 'LLM refinement failed.'),
-                'raw_response': result.get('raw_response') # Pass raw response if available for debugging
+                'error': llm_result.get('error', 'LLM refinement failed.'),
+                'raw_response': llm_result.get('raw_response')
             }), 500
             
     except Exception as e:

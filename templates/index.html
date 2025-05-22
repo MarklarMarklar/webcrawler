@@ -123,6 +123,13 @@
                     </select>
                 </div>
 
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" value="" id="render-js-in-spider">
+                    <label class="form-check-label" for="render-js-in-spider">
+                        Use JavaScript rendering for scraping (slower, for complex sites)
+                    </label>
+                </div>
+
                     <div class="form-group mb-3">
                         <label for="save-path" class="form-label">Save Path:</label>
                         <div class="input-group">
@@ -192,24 +199,23 @@
 
             // Test LLM connection on load
             async function initialConnectionTest() {
-                try {
+            try {
                     const response = await fetch('/api-status'); // Use the /api-status endpoint
                 const data = await response.json();
                     updateApiStatusDisplay(data); // Update UI based on initial status
                     if (data.api_url) { // Populate API URL if returned
                         document.getElementById('api-url').value = data.api_url;
-                    }
-                } catch (error) {
+                }
+            } catch (error) {
                     console.error('Initial connection test error:', error);
                     updateApiStatusDisplay({ success: false, error: 'Could not reach backend for status.', mock_mode: document.getElementById('use-mock-mode').checked });
                 }
             }
             initialConnectionTest();
-
+            
             // Function to add a new selector row to the form
             function addSelectorRow(name = '', selectorValue = '') {
                 const container = document.getElementById('selectors-container');
-                // Create a new selector item div
                 const newItem = document.createElement('div');
                 newItem.classList.add('selector-item', 'input-group', 'mb-2');
                 newItem.innerHTML = `
@@ -218,25 +224,22 @@
                     <button type="button" class="btn btn-sm btn-outline-info test-selector">Test</button>
                     <button type="button" class="btn btn-sm btn-outline-danger remove-selector">Remove</button>
                 `;
-                // Create a div for test results for this specific row
                 const testResultDiv = document.createElement('div');
                 testResultDiv.classList.add('test-result', 'form-text', 'mb-2');
 
-                // Append the new item and its test result div
                 container.appendChild(newItem);
                 container.appendChild(testResultDiv);
 
-                // Re-attach event listener for the new remove button
                 newItem.querySelector('.remove-selector').addEventListener('click', function() {
-                    newItem.remove(); // Remove the input group
-                    testResultDiv.remove(); // Remove its corresponding test result div
+                    newItem.remove();
+                    testResultDiv.remove();
                 });
 
-                // Re-attach event listener for the new test button
                 newItem.querySelector('.test-selector').addEventListener('click', function() {
                     const fieldNameInput = newItem.querySelector('.field-name');
                     const selectorValueInput = newItem.querySelector('.field-selector');
-                    testContainerOrField(selectorValueInput.value, testResultDiv, false);
+                    // Pass the actual field name and true for renderJS
+                    testContainerOrField(selectorValueInput.value, testResultDiv, false, fieldNameInput.value, true);
                 });
             }
             
@@ -249,10 +252,10 @@
                 document.querySelectorAll('#selectors-container .selector-item, #selectors-container .test-result').forEach(el => el.remove());
 
                 if (dataString) {
-                    try {
+            try {
                         const data = JSON.parse(dataString);
                         console.log("Found visualScraperData in sessionStorage:", data);
-
+                
                         if (data.target_url) {
                             document.getElementById('start-url').value = data.target_url;
                         }
@@ -267,7 +270,7 @@
                             data.fields.forEach(field => {
                                 addSelectorRow(field.name, field.selector);
                             });
-                        } else {
+                    } else {
                             // If no fields came from visual tool, but data object existed, add one default empty row
                             addSelectorRow();
                         }
@@ -311,7 +314,7 @@
                 } finally {
                     button.disabled = false;
                     button.textContent = 'Update';
-                }
+            }
             });
 
         // Auto-discover button
@@ -400,7 +403,7 @@
                     }
                             for (const [fieldName, selectorValue] of Object.entries(selectors)) {
                                 addSelectorRow(fieldName, selectorValue);
-                            }
+                    }
                             // Auto-test container and pagination after generation
                             if (document.getElementById('item-container').value) testContainerOrField(document.getElementById('item-container').value, document.getElementById('container-test-result'), true);
                             if (document.getElementById('pagination-selector').value) testContainerOrField(document.getElementById('pagination-selector').value, document.getElementById('pagination-test-result'), false);
@@ -417,79 +420,75 @@
             } finally {
                         button.disabled = false;
                         button.textContent = 'Generate Selectors';
-                    }
-                });
+            }
+        });
             }
             
             // Function to test a selector (for container or individual field)
-            async function testContainerOrField(selectorValue, resultElement, isContainerTest = false) {
+            async function testContainerOrField(selector, resultElement, isContainer, fieldName, renderJS = false) {
                 const url = document.getElementById('start-url').value;
-                const fieldName = resultElement.closest('.selector-item')?.querySelector('.field-name')?.value || (isContainerTest ? 'Container' : 'Field');
-
-                if (!url || !selectorValue) {
-                    resultElement.textContent = 'URL and selector are required.';
-                    resultElement.className = 'form-text test-result error';
-                    // Remove existing refine button if any
-                    resultElement.querySelectorAll('.btn-refine-ai').forEach(btn => btn.remove());
-                    return;
+                if (!url) {
+                    resultElement.textContent = 'Start URL is required to test selectors.';
+                    resultElement.className = 'test-result form-text mb-2 status-error';
+                    return null;
                 }
-                resultElement.innerHTML = 'Testing...'; // Use innerHTML to clear previous buttons too
-                resultElement.className = 'form-text test-result loading';
-                
-                // Remove existing refine button before new test
-                resultElement.querySelectorAll('.btn-refine-ai').forEach(btn => btn.remove());
+                if (!selector) {
+                    resultElement.textContent = 'Selector is required to test.';
+                    resultElement.className = 'test-result form-text mb-2 status-error';
+                    return null;
+                }
+
+                resultElement.textContent = 'Testing selector...';
+                resultElement.className = 'test-result form-text mb-2 status-pending';
 
                 try {
                     const response = await fetch('/test-selector', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url, selector: selectorValue, is_container: isContainerTest })
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            url: url,
+                            selector: selector,
+                            is_container: isContainer,
+                            render_js: renderJS // Send the render_js flag
+                        }),
                     });
-                    const data = await response.json();
+                    const result = await response.json();
                     let resultHTML = '';
-
-                    if (data.success) {
-                        resultElement.className = 'form-text test-result success';
-                        resultHTML = `<p class="mb-1">✓ ${data.message}</p>`;
-                        if (isContainerTest && data.html_snippet_sample) {
-                            resultHTML += `<pre class="html-snippet-preview">${escapeHtml(data.html_snippet_sample)}</pre>`;
-                        } else if (!isContainerTest) {
-                            if (data.text_content_preview) {
-                                resultHTML += `<p class="mb-1"><strong>Text Preview:</strong> ${escapeHtml(data.text_content_preview)}</p>`;
+                    
+                    if (result.success) {
+                        resultElement.className = 'test-result form-text mb-2 status-success';
+                        resultHTML = `<p class="mb-1">✓ ${result.message}</p>`;
+                        if (isContainer && result.html_snippet_sample) {
+                            resultHTML += `<pre class="html-snippet-preview">${escapeHtml(result.html_snippet_sample)}</pre>`;
+                        } else if (!isContainer) {
+                            if (result.text_content_preview) {
+                                resultHTML += `<p class="mb-1"><strong>Text Preview:</strong> ${escapeHtml(result.text_content_preview)}</p>`;
                             }
-                            if (data.html_snippet_display) {
-                                resultHTML += `<p class="mb-1"><strong>HTML Snippet:</strong></p><pre class="html-snippet-preview">${escapeHtml(data.html_snippet_display)}</pre>`;
+                            if (result.html_snippet_display) {
+                                resultHTML += `<p class="mb-1"><strong>HTML Snippet:</strong></p><pre class="html-snippet-preview">${escapeHtml(result.html_snippet_display)}</pre>`;
                             }
-                            // If we have a full html_snippet (for LLM), add the refine button
-                            if (data.html_snippet) {
-                                const refineButton = document.createElement('button');
-                                refineButton.type = 'button';
-                                refineButton.classList.add('btn', 'btn-sm', 'btn-info', 'mt-2', 'btn-refine-ai');
-                                refineButton.textContent = 'Refine with AI';
-                                refineButton.dataset.fieldName = fieldName;
-                                refineButton.dataset.originalSelector = selectorValue;
-                                refineButton.dataset.htmlSnippet = data.html_snippet; // Store the full snippet
-                                
-                                refineButton.addEventListener('click', handleRefineWithAI);
-                                // The resultHTML will be set to innerHTML, so we append the button after setting innerHTML
-                                // For now, just create it. We'll append it after setting resultElement.innerHTML.
+                            // If we have a full html_snippet (for LLM) and a fieldName, add the refine button
+                            if (result.html_snippet && fieldName) {
+                                // Button creation will happen after setting innerHTML
                             }
                         }
                     } else {
-                        resultElement.className = 'form-text test-result error';
-                        resultHTML = `<p>✗ ${data.message || data.error || 'Unknown error'}</p>`;
+                        resultElement.className = 'test-result form-text mb-2 status-error';
+                        resultHTML = `<p>✗ ${result.message || result.error || 'Unknown error'}</p>`;
                     }
                     resultElement.innerHTML = resultHTML;
 
-                    // Now append the refine button if it was created (only for successful non-container tests with snippets)
-                    if (!isContainerTest && data.success && data.html_snippet) {
+                    // Now append the refine button if it was created (only for successful non-container tests with snippets and fieldName)
+                    if (!isContainer && result.success && result.html_snippet && fieldName) {
                         const refineButton = document.createElement('button');
                         refineButton.type = 'button';
                         refineButton.classList.add('btn', 'btn-sm', 'btn-info', 'mt-2', 'btn-refine-ai');
                         refineButton.textContent = 'Refine with AI';
-                        refineButton.dataset.fieldName = fieldName;
-                        refineButton.dataset.originalSelector = selectorValue;
-                        refineButton.dataset.htmlSnippet = data.html_snippet; 
+                        refineButton.dataset.fieldName = fieldName; // Use passed fieldName
+                        refineButton.dataset.originalSelector = selector;
+                        refineButton.dataset.htmlSnippet = result.html_snippet; 
                         refineButton.addEventListener('click', handleRefineWithAI);
                         resultElement.appendChild(refineButton);
                     }
@@ -497,7 +496,7 @@
                 } catch (error) {
                     console.error('Selector test error:', error);
                     resultElement.innerHTML = `<p>✗ Error: ${error.message}</p>`;
-                    resultElement.className = 'form-text test-result error';
+                    resultElement.className = 'test-result form-text mb-2 status-error';
                 }
             }
 
@@ -507,7 +506,8 @@
                 const fieldName = button.dataset.fieldName;
                 const originalSelector = button.dataset.originalSelector;
                 const htmlSnippet = button.dataset.htmlSnippet;
-                const llmQueryContext = document.getElementById('llm-query').value; // Get main LLM query for context
+                const llmQueryContext = document.getElementById('llm-query').value;
+                const pageUrl = document.getElementById('start-url').value; // Get the page URL
                 const resultElement = button.closest('.test-result'); 
                 const selectorItemDiv = resultElement.previousElementSibling; // Assuming .selector-item is always before .test-result
                 const selectorInput = selectorItemDiv ? selectorItemDiv.querySelector('.field-selector') : null;
@@ -515,8 +515,8 @@
                 if (!selectorInput) {
                     console.error("Could not find the selector input field for refinement.");
                     alert("Error: Could not find associated selector input field.");
-                    return;
-                }
+                return;
+            }
 
                 console.log("Refine AI clicked for:", { fieldName, originalSelector, htmlSnippet, llmQueryContext });
                 
@@ -530,46 +530,60 @@
                 button.disabled = true;
                 button.textContent = 'Processing...';
 
-                try {
+            try {
                     const response = await fetch('/refine-selector-via-llm', {
-                        method: 'POST',
+                    method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
+                    body: JSON.stringify({ 
                             field_name: fieldName,
                             original_selector: originalSelector,
                             html_snippet: htmlSnippet,
-                            user_query_context: llmQueryContext
-                        })
-                    });
+                            user_query_context: llmQueryContext,
+                            page_url: pageUrl // Send the page URL
+                    })
+                });
                     const result = await response.json();
                     statusP.remove(); // Remove "Asking AI..." message
 
                     if (result.success && result.data) {
                         const suggestion = result.data;
+                        const autoTest = result.auto_test_result; // Get auto-test result
+
                         let finalSelector = suggestion.refined_selector;
-
+                        // Construct the display selector as per AI's logic
                         if (suggestion.extraction_method === 'text') {
-                            if (!finalSelector.endsWith('::text')) {
-                                finalSelector += '::text';
-                            }
+                            if (!finalSelector.endsWith('::text')) finalSelector += '::text';
                         } else if (suggestion.extraction_method === 'attribute' && suggestion.extraction_detail) {
-                            if (!finalSelector.includes('::attr')) { // Avoid double appending if already there
-                                finalSelector += `::attr(${suggestion.extraction_detail})`;
-                            }
+                            if (!finalSelector.includes('::attr')) finalSelector += `::attr(${suggestion.extraction_detail})`;
                         }
-                        // If extraction_method is 'direct_selector', finalSelector is used as is.
-
-                        // Don't update selectorInput.value yet.
-                        // selectorInput.value = finalSelector; 
 
                         const suggestionDiv = document.createElement('div');
-                        suggestionDiv.className = 'mt-1 alert alert-success refinement-suggestion';
+                        suggestionDiv.className = 'mt-1 alert alert-info refinement-suggestion'; // Changed to alert-info for now
                         suggestionDiv.innerHTML = `
                             <strong>AI Suggestion (Confidence: ${ (suggestion.confidence * 100).toFixed(0) }%)</strong><br>
                             New Selector: <code>${escapeHtml(finalSelector)}</code><br>
                             Method: ${suggestion.extraction_method} ${suggestion.extraction_detail ? '('+escapeHtml(suggestion.extraction_detail)+')' : ''}<br>
                             Notes: ${escapeHtml(suggestion.notes)}
                         `;
+                        
+                        // Display auto-test results
+                        const autoTestDiv = document.createElement('div');
+                        autoTestDiv.className = 'mt-2 auto-test-results';
+                        if (autoTest && autoTest.success) {
+                            autoTestDiv.innerHTML = `<p class="text-success">✓ Auto-test of AI selector: ${autoTest.message}</p>`;
+                            if (autoTest.text_content_preview) {
+                                autoTestDiv.innerHTML += `<p>Preview: ${escapeHtml(autoTest.text_content_preview)}</p>`;
+                            }
+                            suggestionDiv.classList.remove('alert-info');
+                            suggestionDiv.classList.add('alert-success'); // Make it green if auto-test is good
+                        } else if (autoTest) {
+                            autoTestDiv.innerHTML = `<p class="text-danger">✗ Auto-test of AI selector: ${autoTest.message || autoTest.error || 'Failed'}</p>`;
+                            suggestionDiv.classList.remove('alert-info');
+                            suggestionDiv.classList.add('alert-warning'); // Make it yellow/orange if auto-test failed
+                        } else {
+                            autoTestDiv.innerHTML = `<p class="text-warning">Auto-test results not available.</p>`;
+                        }
+                        suggestionDiv.appendChild(autoTestDiv);
                         resultElement.appendChild(suggestionDiv);
 
                         const actionsDiv = document.createElement('div');
@@ -585,9 +599,18 @@
                             actionsDiv.remove();
                             button.disabled = false;
                             button.textContent = 'Refine with AI';
-                            // Optionally, re-test the accepted selector immediately
-                            // testContainerOrField(finalSelector, resultElement, false);
+                            // Optionally, re-test the accepted selector immediately by calling testContainerOrField again
+                            // testContainerOrField(finalSelector, resultElement, false, fieldName, true);
                         };
+
+                        // Disable Accept button if auto-test failed or found no results
+                        if (!autoTest || !autoTest.success || autoTest.match_count === 0) {
+                            acceptBtn.disabled = true;
+                            acceptBtn.title = "Accept disabled: AI's suggested selector failed live test or found no results.";
+                            if (autoTest && autoTest.match_count === 0) {
+                                autoTestDiv.innerHTML += `<p class="text-danger"><strong>Warning:</strong> AI selector found 0 matches on the live page.</p>`;
+                            }
+                        }
 
                         const discardBtn = document.createElement('button');
                         discardBtn.type = 'button';
@@ -604,7 +627,7 @@
                         actionsDiv.appendChild(discardBtn);
                         resultElement.appendChild(actionsDiv);
 
-                    } else {
+                } else {
                         const errorP = document.createElement('p');
                         errorP.className = 'text-danger mt-1 refinement-error';
                         errorP.textContent = `AI Refinement Error: ${result.error || 'Unknown error'}`;
@@ -614,8 +637,8 @@
                         resultElement.appendChild(errorP);
                         button.disabled = false; // Re-enable on error
                         button.textContent = 'Refine with AI';
-                    }
-                } catch (error) {
+                }
+            } catch (error) {
                     console.error("Error calling /refine-selector-via-llm:", error);
                     statusP.remove(); // Ensure status is removed if it hasn't been
                     const errorP = document.createElement('p');
@@ -643,8 +666,8 @@
             if(testContainerButton) {
                 testContainerButton.addEventListener('click', function() {
                     const selectorValue = document.getElementById('item-container').value;
-            const resultDiv = document.getElementById('container-test-result');
-                    testContainerOrField(selectorValue, resultDiv, true);
+                    const resultDiv = document.getElementById('container-test-result');
+                    testContainerOrField(selectorValue, resultDiv, true, null, true); // Pass null for fieldName, true for renderJS
                 });
             }
             
@@ -677,7 +700,7 @@
                     
                     fieldNameInput.classList.remove('is-invalid');
                     selectorInput.classList.remove('is-invalid');
-
+                
                     if (!fieldName || !selectorValue) {
                         if (!fieldName) fieldNameInput.classList.add('is-invalid');
                         if (!selectorValue) selectorInput.classList.add('is-invalid');
@@ -697,7 +720,7 @@
                 if (itemContainer) formSelectors['item_container'] = itemContainer;
             const paginationSelector = document.getElementById('pagination-selector').value;
                 if (paginationSelector) formSelectors['pagination_selector'] = paginationSelector;
-
+                
                 resultsDiv.innerHTML = '<div class="alert alert-info">Scraping in progress...</div>';
                 const scrapeButton = this.querySelector('button[type="submit"]');
                     scrapeButton.disabled = true;
@@ -712,7 +735,8 @@
                             selectors: formSelectors,
                             export_format: document.getElementById('export-format').value,
                             save_path: document.getElementById('save-path').value,
-                            page_limit: parseInt(document.getElementById('page-limit').value) || 0 
+                            page_limit: parseInt(document.getElementById('page-limit').value) || 0,
+                            render_js_in_spider: document.getElementById('render-js-in-spider').checked
                     })
                 });
                 const data = await response.json();
@@ -749,8 +773,8 @@
                     if (currentPath) {
                         let pathWithoutExt = currentPath.replace(/\.(json|csv)$/i, '');
                         savePathInput.value = `${pathWithoutExt}.${this.value}`;
-                    }
-                });
+            }
+        });
             }
             
             // File dialog helper
@@ -761,9 +785,9 @@
                     // or backend interaction if you need server-side browsing.
                     // For now, it's a conceptual button.
                     alert("Please manually enter the full path for saving the file. For example: C:/scraped_data/output.json or /home/user/output.csv");
-                });
+        });
             }
-            
+
             // Page limit buttons
         document.querySelectorAll('.page-limit-button').forEach(button => {
             button.addEventListener('click', function() {
